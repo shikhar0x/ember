@@ -84,12 +84,8 @@ python gui_app.py
 ```
 This launches the full app in a single command. The backend starts automatically.
 
-Option 2 - Tauri dev mode:
-Open two terminals. In the first, start the Python backend:
-```
-python -m core.api.server
-```
-In the second, start the Tauri frontend:
+Option 2 - Tauri UI:
+Start the Tauri frontend:
 ```
 cd tauri-app
 npm run tauri dev
