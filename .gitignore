@@ -7,8 +7,8 @@ __pycache__/
 tokens.json
 core/token_store.json
 
-# Downloads
-downloads/
+# distribution files
+dist/
 
 # Tauri / Rust build
 **/target/
