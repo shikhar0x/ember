@@ -1050,13 +1050,13 @@
     margin: 0; color: #FFFFFF;
     line-height: 1.25;
     overflow: hidden; text-overflow: ellipsis;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
   }
 
   .track-artist {
     margin: 0; font-size: 1rem; color: #A0A4A8; font-weight: 500;
     overflow: hidden; text-overflow: ellipsis;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
   }
 
   .divider { height: 1px; background: #2A2D35; margin: .25rem 0; }
