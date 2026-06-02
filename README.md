@@ -16,6 +16,16 @@ Ember lets you download anything from Spotify or YouTube by just pasting a link.
 
 ---
 
+## Tested Platforms
+
+- Windows ✅
+- Linux ✅
+- macOS ⚠️ Untested
+
+Ember is built using cross-platform technologies (Python, Tauri, and SvelteKit), but only Windows and Linux have been tested so far.
+
+---
+
 ## Architecture
 Ember started as a pure Python application. The backend (everything from resolving Spotify metadata to downloading and tagging audio) was already built in Python, making use of libraries like yt-dlp, mutagen, and requests that have no real equivalent in Rust. Rather than rewrite any of that, a Tauri frontend was added on top as a desktop UI wrapper, with SvelteKit handling the interface.
 
@@ -26,17 +36,38 @@ This means the Python backend handles all the heavy work, and the frontend is pu
 ---
 
 ## Prerequisites
+
 - Python 3.13
 - Node.js and npm (latest)
-- Rust and Cargo (latest)
-- A Chromium-based browser. Brave is recommended, but Chrome, Chromium, and Edge also work. Ember will automatically find whichever one is installed. The only requirement is that you are logged into Spotify in that browser, as Ember harvests its authentication token from it on startup.
+- Rust and Cargo (stable)
+
+### Windows Development
+
+If you are building Ember from source on Windows, Rust requires the Microsoft Visual C++ Build Tools (MSVC).
+
+Install either:
+
+- Visual Studio Community with the Desktop Development with C++ workload
+- Visual Studio Build Tools with the MSVC toolchain
+
+### Browser
+A Chromium-based browser is required for Spotify authentication.
+
+Supported browsers include:
+
+- Brave (recommended)
+- Chrome
+- Chromium
+- Microsoft Edge
+
+You must be logged into Spotify in one of these browsers before launching Ember.
 
 ---
 
 ## How Authentication Works
 Ember never asks you to enter your Spotify username or password. Instead, it borrows the login session you already have in your browser.
 
-When Ember starts up, it quietly opens your browser in the background, visits the Spotify web player, and captures the authentication token that Spotify's own website uses to make requests. This token is then cached locally so the process only needs to happen once every hour or so.
+When Ember starts up, it may briefly open a browser tab to access Spotify's web player and retrieve the authentication token used by Spotify's website. The token is cached locally and is typically refreshed about once per hour.
 
 If for any reason that process fails, Ember falls back to Spotify's public embed player, which works without any login at all. The embed fallback gives slightly less metadata but still gets the job done for most tracks.
 
@@ -91,7 +122,6 @@ cd tauri-app
 npm run tauri dev
 ```
 
-No platform-specific setup is needed. Ember handles all OS differences automatically.
 
 ---
 
