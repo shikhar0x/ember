@@ -1,14 +1,15 @@
 import { defineConfig, createLogger } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // Suppress transient PostCSS errors from Svelte pre-transform race condition
 const logger = createLogger();
 const origError = logger.error.bind(logger);
+// @ts-ignore
 logger.error = (msg, options) => {
   if (typeof msg === "string" && msg.includes("Unknown word")) return;
+
   origError(msg, options);
 };
 
