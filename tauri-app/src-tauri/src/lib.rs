@@ -179,21 +179,14 @@ fn start_backend() {
 
     let bind_dir = std::env::current_dir().ok();
     let exec_dir = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|p| p.to_path_buf()));
-    let project_root = bind_dir
-        .as_ref()
-        .and_then(|dir| find_project_root(dir))
-        .or_else(|| exec_dir.as_ref().and_then(|dir| find_project_root(dir)))
-        .unwrap_or_else(|| bind_dir.unwrap_or_else(|| PathBuf::from(".")));
+    let project_root = PathBuf::from("/usr/lib/Ember/_up_/_up_");
 
     let python_path = get_python_path().or_else(get_system_python);
     if let Some(python_path) = python_path {
-        let child = Command::new(&python_path)
-            .arg("-m")
-            .arg("core.api.server")
-            .current_dir(&project_root)
+        let child = Command::new("/usr/lib/Ember/_up_/_up_/dist/ember-backend")
             .spawn()
-            .expect("Failed to start python backend");
-
+            .expect("Failed to start backend");
+            
         *backend_child().lock().unwrap() = Some(child);
 
         let mut started = false;
