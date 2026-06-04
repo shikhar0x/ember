@@ -162,7 +162,7 @@ fn start_backend(app: &tauri::AppHandle) {
             
         println!("[PROD MODE] Spawning compiled sidecar...");
         #[cfg(target_os = "windows")]
-        let child_cmd = {
+        let mut child_cmd = {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             let mut cmd = Command::new(&backend_path);
@@ -170,7 +170,7 @@ fn start_backend(app: &tauri::AppHandle) {
             cmd
         };
         #[cfg(not(target_os = "windows"))]
-        let child_cmd = Command::new(&backend_path);
+        let mut child_cmd = Command::new(&backend_path);
 
         child_cmd
             .spawn()
