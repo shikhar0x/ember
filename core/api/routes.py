@@ -284,6 +284,8 @@ def enrich_track(track_data: TrackSchema):
                         t.cover_url = data["cover_url"]
                     if data.get("album") and (not t.album or t.album == getattr(t, "_playlist_name", None)):
                         t.album = data["album"]
+                    if data.get("duration_s") and not t.duration:
+                        t.duration = data["duration_s"]
             except Exception as e:
                 print(f"[Enrich Error] {tid}: {e}")
 
