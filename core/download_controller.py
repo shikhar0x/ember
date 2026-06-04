@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from core.utils import sanitize_filename as core_sanitize
-from core.events import emit, batch_event, batch_end_event
+from core.events import emit, batch_event, batch_end_event, progress_event
 
                                                                       
 from core.http import get_bytes  # noqa: F401
@@ -143,18 +143,42 @@ class DownloadController:
         succeeded = 0
         failed    = 0
 
-                                                                        
-        track_futures = []
-        for t in tracks:
+        # Batch enrich all tracks before downloading to instantly grab ISRCs
+        from core.enrich import enrich_tracks, apply_enrichment_updates
+        updates, _ = enrich_tracks(tracks)
+        if updates:
+            apply_enrichment_updates(updates)
+
+        # Synchronously ensure output dir exists
+        pl_dir.mkdir(parents=True, exist_ok=True)
+
+        track_futures = {}
+        track_progress = {i: 0.0 for i in range(total)}
+        progress_lock = threading.Lock()
+
+        def make_callback(index: int):
+            def _cb(event: dict):
+                if event.get("type") == "progress":
+                    with progress_lock:
+                        track_progress[index] = event.get("progress", 0.0)
+                        # We emit the global fractional progress so the UI progress bar is perfectly smooth
+                        overall_pct = (completed + sum(track_progress.values())) / total
+                    emit(callback, progress_event(overall_pct, f"Downloading {completed}/{total}..."))
+            return _cb
+
+        for i, t in enumerate(tracks):
             fut = self._executor.submit(
-                _spotify.download_track, t, options, pl_dir, None,
+                _spotify.download_track, t, options, pl_dir, make_callback(i),
             )
             self._track_future(fut)
-            track_futures.append(fut)
+            track_futures[fut] = i
 
-                                          
-        for fut in concurrent.futures.as_completed(track_futures):
-            completed += 1
+        # Wait for completion
+        for fut in concurrent.futures.as_completed(track_futures.keys()):
+            idx = track_futures[fut]
+            with progress_lock:
+                completed += 1
+                track_progress[idx] = 0.0
             try:
                 if fut.result():
                     succeeded += 1
