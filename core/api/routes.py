@@ -162,6 +162,37 @@ def download_media(req: MediaRequest):
     return _submit(_controller.download_media, data)
 
 
+@router.post("/download/cover")
+def download_cover(url: str = Query(...), title: str = Query("cover")):
+    """Download cover art image to the default download directory."""
+    import re
+    import requests
+    from pathlib import Path
+
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if r.status_code != 200:
+            raise HTTPException(status_code=502, detail="Failed to fetch cover image")
+
+        # Sanitize filename
+        safe = re.sub(r'[<>:"/\\|?*]', '_', title).strip() or "cover"
+        out_path = Path(_controller.download_dir) / f"{safe}.jpg"
+
+        # Avoid overwriting — append counter if needed
+        counter = 1
+        while out_path.exists():
+            out_path = Path(_controller.download_dir) / f"{safe} ({counter}).jpg"
+            counter += 1
+
+        out_path.write_bytes(r.content)
+        return {"status": "ok", "path": str(out_path)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Task status / polling ─────────────────────────────────────────────────────
 
 @router.get("/task/{task_id}", response_model=TaskStatus)
