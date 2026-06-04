@@ -1046,6 +1046,7 @@
     display: flex; flex-direction: column;
     gap: .75rem; min-width: 0;
     height: 100%;
+    overflow: hidden;
   }
 
   .meta-header {
@@ -1053,13 +1054,15 @@
   }
 
   .meta-top { 
-    flex: 1; 
+    flex: 1 1 0; 
     display: flex; 
     flex-direction: column; 
     gap: .75rem; 
     overflow-y: auto;
     min-height: 0;
     padding-right: 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.15) transparent;
   }
   .meta-top > * { flex-shrink: 0; }
   
@@ -1360,14 +1363,17 @@
 
   /* ── Track list ─────────────────────────────────────────────────────────── */
   .track-list {
-    flex: 1;
+    flex: 1 1 0;
     overflow-y: auto;
     overflow-x: hidden;
     min-height: 0;
+    max-height: 100%;
     display: flex;
     flex-direction: column;
     gap: 2px;
     padding-right: 0.25rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.15) transparent;
   }
   .track-list::-webkit-scrollbar { width: 4px; }
   .track-list::-webkit-scrollbar-track { background: transparent; }
