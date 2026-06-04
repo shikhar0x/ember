@@ -2,7 +2,7 @@
 
 Ember is a bleeding-edge desktop application built with Tauri, Svelte, and Python that redefines the music downloading experience. It fuses a hyper-optimized backend pipeline with a stunning "Liquid Glass" frontend aesthetic to deliver an unparalleled user experience.
 
-![Liquid Glass Aesthetic](cover.png)
+![Liquid Glass Aesthetic](assets/cover.png)
 
 ## Features
 
