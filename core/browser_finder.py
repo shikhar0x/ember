@@ -159,18 +159,35 @@ _CANDIDATE_FACTORIES = [
 
 def _get_major_version(binary: str) -> int:
     """Return the major version of a Chromium-family browser, or 0 on failure."""
+    # Strategy 1: --version flag (works on Linux/macOS, sometimes Windows)
     try:
         result = subprocess.run(
             [binary, "--version"],
             capture_output=True, text=True, timeout=8
         )
         text = result.stdout.strip() or result.stderr.strip()
-                                                                          
         match = re.search(r"(\d+)\.\d+", text)
         if match:
             return int(match.group(1))
     except Exception:
         pass
+
+    # Strategy 2: Windows file version (PowerShell) — handles "Opening in
+    # existing browser session" case when the browser is already running
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command",
+                 f'(Get-Item \'{binary}\').VersionInfo.FileVersion'],
+                capture_output=True, text=True, timeout=8
+            )
+            text = result.stdout.strip()
+            match = re.search(r"(\d+)\.\d+", text)
+            if match:
+                return int(match.group(1))
+        except Exception:
+            pass
+
     return 0
 
 
@@ -269,7 +286,11 @@ def _try_webdriver_manager(major_version: int, browser: Optional[BrowserInfo]) -
             print(f"[BrowserFinder] Edge driver install failed: {e}")
             return None
 
-    path = ChromeDriverManager(chrome_type=chrome_type).install()
+    driver_kwargs = {"chrome_type": chrome_type}
+    if major_version > 0:
+        driver_kwargs["driver_version"] = str(major_version)
+        
+    path = ChromeDriverManager(**driver_kwargs).install()
     print(f"[BrowserFinder] webdriver-manager installed ChromeDriver: {path}")
     return path
 
