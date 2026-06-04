@@ -85,7 +85,6 @@ class InputParser:
                 except Exception as e:
                     raise Exception(f"Album parsing failed: {e}")
             elif "/playlist/" in url:
-                                                                  
                 return get_playlist(url)
 
         except Exception as e:
