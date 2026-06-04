@@ -1,28 +1,74 @@
-# Ember - The Premium Music Downloader
+# Ember
 
-Ember is a bleeding-edge desktop application built with Tauri, Svelte, and Python that redefines the music downloading experience. It fuses a hyper-optimized backend pipeline with a stunning "Liquid Glass" frontend aesthetic to deliver an unparalleled user experience.
+Ember is a desktop application built with Tauri, SvelteKit, and Python for downloading music. It uses a local Python backend API to process metadata and a modern frontend interface.
 
-![Liquid Glass Aesthetic](assets/cover.png)
+![Ember Interface](assets/cover.png)
 
 ## Features
 
-- **Liquid Glass Aesthetic**: A deeply immersive, modern UI featuring pure glassmorphism, floating ambient orbs, and buttery smooth physics-based micro-animations.
-- **The "Pulse & Sweep" Progress Engine**: A completely overhauled, byte-by-byte smooth progress bar featuring sweeping light beams, pulsating red shadows, and a continuous sine-wave DNA flow animation.
-- **Intelligent Pathfinder**: Feed Ember *any* Spotify Track, Album, or Playlist link. It parses the metadata, queries the Spotify API, and enriches it instantly.
-- **Flawless Audio Mapping**: Ember's enrichment engine automatically maps Spotify metadata to the exact corresponding high-quality YouTube audio stream using a dual search-and-verify algorithm.
-- **Concurrent Batch Processing**: Download massive 100+ track playlists in parallel. The python worker pool manages throttling, chunking, and file writing synchronously while keeping the UI perfectly responsive.
-- **Automatic ID3 Tagging**: Downloads and embeds high-resolution cover art, artist tags, album info, and track numbers directly into the `.mp3` or `.m4a` files.
-- **Direct YouTube Video Support**: Not just for Spotify. Paste any YouTube video or Shorts link and select from 1080p MP4 or high-bitrate MP3 extraction.
+- **Modern Interface**: A glassmorphism-inspired UI with physics-based animations built using SvelteKit and TypeScript.
+- **Continuous Progress Tracking**: Real-time byte-level progress updates aggregated across concurrent downloads.
+- **Advanced GraphQL Scraping**: Directly interfaces with internal Spotify GraphQL endpoints to instantly harvest rich, structured metadata for Tracks, Albums, and Playlists, with the public embed API acting as a robust fallback.
+- **Audio Mapping**: Maps Spotify metadata to the corresponding YouTube audio stream using a dual search-and-verify algorithm.
+- **Concurrent Batch Processing**: Downloads multi-track playlists in parallel using a Python worker pool that manages throttling and chunking.
+- **Automatic ID3 Tagging**: Embeds high-resolution cover art, artist tags, album info, and track numbers into downloaded `.mp3` or `.m4a` files.
+- **YouTube Support**: Direct extraction from YouTube video or Shorts links (MP4 or MP3).
 
-## Architecture
+## Architecture & IPC Flow
 
 Ember leverages a two-tier architecture:
-1. **Frontend (Tauri + Svelte)**: A highly optimized, reactive user interface with custom CSS animations and a zero-dependency design system.
-2. **Backend (Python)**: A robust sidecar executable running a FastAPI-based local API, utilizing `yt-dlp` for raw extraction, `mutagen` for ID3 tagging, and `playwright`/`selenium` driven GraphQL scraping for metadata enrichment.
 
-## Virtual Environment Setup (Required)
+1. **Frontend (Tauri + SvelteKit + TypeScript)**: A reactive user interface.
+2. **Backend (Python)**: A sidecar executable running a FastAPI-based local API on `127.0.0.1:8008`.
 
-Before building from source or running the development server, you **must** set up a Python virtual environment. Ember's development mode explicitly looks for a `.venv` folder to spawn the backend.
+**IPC Flow**: 
+The Tauri shell manages the lifecycle of the Python backend. Upon startup, Tauri verifies the backend is running by polling the `/health` endpoint. The frontend then communicates with the Python workers via HTTP requests to `localhost:8008`, while progress events are streamed back to the UI.
+
+*Note: The repository also contains a legacy CustomTkinter GUI. To run it, activate your virtual environment (`.venv\Scripts\activate` on Windows, or `source .venv/bin/activate` on Linux/macOS) and execute `python gui_app.py`. The Tauri frontend remains the modern, primary interface.*
+
+## Prerequisites
+
+- Python 3.13
+- Node.js and npm (latest)
+- Rust and Cargo (stable)
+
+### Windows Development
+
+If you are building Ember from source on Windows, Rust requires the Microsoft Visual C++ Build Tools (MSVC).
+
+Install either:
+- Visual Studio Community with the Desktop Development with C++ workload
+- Visual Studio Build Tools with the MSVC toolchain
+
+### Linux Development
+
+If you are building on Linux, you must install Tauri's system dependencies and the core build toolchain:
+```bash
+sudo apt update
+sudo apt install libwebkit2gtk-4.0-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+### macOS Development
+
+If you are building on macOS, you must install the Xcode Command Line Tools:
+```bash
+xcode-select --install
+```
+
+### Browser
+A Chromium-based browser is required for Spotify authentication. Ember uses browser cookie extraction for `yt-dlp` and utilizes Playwright in `core/isrc.py` for ISRC token harvesting from `ifpi.org`.
+
+Supported browsers include:
+- Brave (recommended)
+- Chrome
+- Chromium
+- Microsoft Edge
+
+You must be logged into Spotify in one of these browsers before launching Ember.
+
+## Virtual Environment Setup
+
+Before building from source or running the development server, set up the virtual environment:
 
 ```bash
 # 1. Create the virtual environment
@@ -55,9 +101,11 @@ To compile the application into a standalone installer, ensure your virtual envi
    npm install
    npm run tauri build
    ```
-   Tauri will automatically bundle the backend executable and generate both a standalone `.exe` and an `.msi` installer for you.
+   Tauri will bundle the backend executable and generate both a standalone `.exe` and an `.msi` installer.
 
-### Linux & macOS (Untested)
+### Linux & macOS
+Ember's rust core has full Unix process management support (using `ss`/`lsof` for port management).
+
 1. **Build the Python Backend** (Requires PyInstaller):
    ```bash
    pyinstaller ember-backend.spec
@@ -78,7 +126,7 @@ To compile the application into a standalone installer, ensure your virtual envi
    npm install
    npm run tauri build
    ```
-   Tauri will bundle the backend and generate an `.AppImage` and `.deb` package on Linux, or an `.app` and `.dmg` on macOS.
+   Tauri will bundle the backend and generate `.AppImage` / `.deb` / `.rpm` packages on Linux, or `.app` / `.dmg` on macOS.
 
 ## Development
 
@@ -89,5 +137,12 @@ cd tauri-app
 npm run tauri dev
 ```
 
----
-*Ember. Yours, forever.*
+## Troubleshooting
+
+- **Backend fails to start**: Ensure the virtual environment (`.venv`) exists and all dependencies from `requirements.txt` are installed. Tauri looks specifically for the `.venv` directory to launch the API in dev mode.
+- **Browser/Metadata extraction errors**: Ensure you have Chrome or Brave installed, as the extraction engine relies on them for cookie harvesting and Playwright automation.
+- **Zombie processes**: The Tauri shell automatically kills orphaned backend instances on port 8008 on startup. If you experience hangs, you can manually kill processes listening on port 8008.
+
+## License
+
+This project is licensed under the terms specified in the [LICENSE.txt](LICENSE.txt) file.
