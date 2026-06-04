@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use tauri::Manager;
 use std::net::TcpStream;
 use std::process::{Child, Command};
@@ -113,6 +114,7 @@ fn kill_backend_port(port: u16) {
     }
 }
 
+#[allow(unused_variables)]
 fn start_backend(app: &tauri::AppHandle) {
     // Purge orphaned backend instances to ensure a clean state and prevent deadlocks
     if is_backend_running() {
@@ -123,20 +125,57 @@ fn start_backend(app: &tauri::AppHandle) {
 
     println!("Starting Ember backend...");
 
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .expect("Failed to get resource directory");
+    #[cfg(debug_assertions)]
+    let child = {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let root_dir = manifest_dir.join("..").join("..");
+        
+        #[cfg(target_os = "windows")]
+        let python_path = root_dir.join(".venv").join("Scripts").join("python.exe");
+        #[cfg(not(target_os = "windows"))]
+        let python_path = root_dir.join(".venv").join("bin").join("python");
 
-    let backend_path = resource_dir
-        .join("_up_")
-        .join("_up_")
-        .join("dist")
-        .join("ember-backend");
+        let server_path = root_dir.join("core").join("api").join("server.py");
+        
+        println!("[DEV MODE] Spawning raw Python backend...");
+        Command::new(python_path)
+            .env("PYTHONPATH", &root_dir)
+            .arg("-W")
+            .arg("ignore")
+            .arg(server_path)
+            .spawn()
+            .expect("Failed to start python backend in dev mode")
+    };
 
-    let child = Command::new(&backend_path)
-        .spawn()
-        .expect("Failed to start backend");
+    #[cfg(not(debug_assertions))]
+    let child = {
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .expect("Failed to get resource directory");
+
+        let backend_path = resource_dir
+            .join("_up_")
+            .join("_up_")
+            .join("dist")
+            .join("ember-backend");
+            
+        println!("[PROD MODE] Spawning compiled sidecar...");
+        #[cfg(target_os = "windows")]
+        let child_cmd = {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let mut cmd = Command::new(&backend_path);
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd
+        };
+        #[cfg(not(target_os = "windows"))]
+        let child_cmd = Command::new(&backend_path);
+
+        child_cmd
+            .spawn()
+            .expect("Failed to start bundled backend")
+    };
 
     *backend_child().lock().unwrap() = Some(child);
 
