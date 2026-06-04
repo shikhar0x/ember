@@ -624,8 +624,10 @@ class Ember(ctk.CTk):
             from PIL import ImageDraw
             draw = ImageDraw.Draw(mask)
             draw.rounded_rectangle([(0, 0), (new_w, new_h)], radius=radius, fill=255)
+            rounded_img = Image.new("RGBA", (new_w, new_h), (0, 0, 0, 0))
+            rounded_img.paste(pil_image, mask=mask)
             
-            return ctk.CTkImage(light_image=rounded, dark_image=rounded, size=(new_w, new_h))
+            return ctk.CTkImage(light_image=rounded_img, dark_image=rounded_img, size=(new_w, new_h))
         except Exception as e:
             print(f"[DEBUG] load_image_from_bytes failed: {e}")
             return None
