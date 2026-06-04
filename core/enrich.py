@@ -62,20 +62,21 @@ def enrich_tracks(tracks, session_checker=None):
                     result_map[full.get("track_id")] = full
         except Exception as e:
             print(f"[Enrichment Error] Retry failed: {e}")
-
-    valid_results = list(result_map.values())
+        except Exception:
+            pass
 
     id_map = {t._spotify_track_id: t for t in to_enrich if hasattr(t, "_spotify_track_id")}
     updates = []
 
-    for full in valid_results:
+    for tid, full in result_map.items():
         if session_checker and not session_checker():
-            return [], None
+            break
+
         try:
-            tid = full.get("track_id")
             target = id_map.get(tid)
             if not target:
                 continue
+
             updates.append((target, full))
         except Exception as e:
             print(f"[Enrichment Error] {tid}: {e}")
