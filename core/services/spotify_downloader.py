@@ -52,13 +52,19 @@ def download_track(
 
     try:
                           
+        # --- Ensure track is fully enriched before resolving ---
+        if not getattr(track, "_enriched", False) or not track.cover_url or not track.isrc:
+            from core.enrich import enrich_tracks, apply_enrichment_updates
+            updates, _ = enrich_tracks([track])
+            if updates:
+                apply_enrichment_updates(updates)
+
         emit(callback, progress_event(0.0, "Finding best match..."))
         candidates = resolve(track)
         if not candidates:
             emit(callback, error_event("No match found"))
             return False
 
-                                 
         emit(callback, progress_event(0.05, "Downloading audio..."))
 
         def _hook(d):
@@ -89,7 +95,6 @@ def download_track(
             emit(callback, error_event("Download failed"))
             return False
 
-                                               
         raw_path = result["path"]
         yt_thumb = result["thumbnail_bytes"]
 
@@ -97,13 +102,6 @@ def download_track(
             if final_path.exists():
                 os.remove(str(final_path))
             shutil.move(raw_path, str(final_path))
-
-                                   
-        if not getattr(track, "_enriched", False) or not track.cover_url:
-            from core.enrich import enrich_tracks, apply_enrichment_updates
-            updates, _ = enrich_tracks([track])
-            if updates:
-                apply_enrichment_updates(updates)
 
                                       
         emit(callback, progress_event(1.0, "Embedding metadata..."))
