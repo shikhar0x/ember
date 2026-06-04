@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -29,7 +30,14 @@ class TokenManager:
     CACHE_FILE = "tokens.json"
 
     def __init__(self, session=None):
-        self._session = session or requests.Session()
+        if session:
+            self._session = session
+        else:
+            self._session = requests.Session()
+            adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
+            self._session.mount("https://", adapter)
+            self._session.mount("http://", adapter)
+        
         self._bearer = None
         self._expires_at = 0
         self._client_token: str = ""
@@ -83,8 +91,8 @@ class TokenManager:
                         "js_sdk_data": {
                             "device_brand": "unknown",
                             "device_model": "unknown",
-                            "os": "windows",
-                            "os_version": "NT 10.0",
+                            "os": "linux" if sys.platform.startswith("linux") else ("macos" if sys.platform == "darwin" else "windows"),
+                            "os_version": "unknown" if sys.platform != "win32" else "NT 10.0",
                             "device_id": "",
                             "device_type": "computer",
                         },
@@ -119,7 +127,7 @@ class TokenManager:
 
         options = Options()
         options.binary_location = browser_info.binary
-        options.add_argument("--headless=new")
+        options.add_argument("--headless")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-dev-shm-usage")
@@ -127,8 +135,13 @@ class TokenManager:
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
+        import subprocess
+        service_kwargs = {}
+        if sys.platform == "win32":
+            service_kwargs["creation_flags"] = subprocess.CREATE_NO_WINDOW
+
         driver = webdriver.Chrome(
-            service=Service(driver_path),
+            service=Service(driver_path, **service_kwargs),
             options=options,
         )
 
@@ -193,7 +206,9 @@ class TokenManager:
                     self._fetch_token()
 
         if not self._client_token or time.time() >= self._client_token_expires_at:
-            self._fetch_client_token()
+            with self._lock:
+                if not self._client_token or time.time() >= self._client_token_expires_at:
+                    self._fetch_client_token()
 
         headers = {
             "authorization": self._bearer,
@@ -501,10 +516,13 @@ def get_playlist(playlist_id: str, tm: TokenManager, limit: int = PLAYLIST_LIMIT
                     )
                     cover_url = best_img.get("url")
 
+                raw_id = track_data.get("uri") or ""
                 track_id = (
                     track_data.get("id")
                     or track_data.get("trackV2", {}).get("data", {}).get("id")
                 )
+                if not track_id and "spotify:track:" in raw_id:
+                    track_id = raw_id.split(":")[-1]
 
                 date = album.get("date") or {}
                 iso = (date.get("isoString") or "")[:4]
