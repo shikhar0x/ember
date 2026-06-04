@@ -454,7 +454,7 @@ def get_playlist(url: str) -> List[Track]:
                 track_id = t.get("track_id")
                 if track_id:
                     track._spotify_track_id = track_id
-                track._enriched = bool(t.get("cover_url"))
+                track._enriched = False
                 track._playlist_name = playlist_name
 
                 if idx == 1:
