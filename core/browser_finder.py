@@ -177,7 +177,7 @@ def _get_major_version(binary: str) -> int:
     if sys.platform == "win32":
         try:
             result = subprocess.run(
-                ["powershell", "-Command",
+                ["powershell.exe", "-Command",
                  f'(Get-Item \'{binary}\').VersionInfo.FileVersion'],
                 capture_output=True, text=True, timeout=8
             )
