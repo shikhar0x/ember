@@ -1,170 +1,93 @@
-# Ember
-A desktop app that downloads music and video from Spotify and YouTube, with proper metadata tagging and cover art.
+# Ember - The Premium Music Downloader
 
----
+Ember is a bleeding-edge desktop application built with Tauri, Svelte, and Python that redefines the music downloading experience. It fuses a hyper-optimized backend pipeline with a stunning "Liquid Glass" frontend aesthetic to deliver an unparalleled user experience.
 
-## What it does
-Ember lets you download anything from Spotify or YouTube by just pasting a link. For Spotify tracks, albums, and playlists, it finds the best matching audio from YouTube, downloads it, and embeds all the metadata (title, artist, album, cover art, ISRC, and more). For YouTube links, you can grab just the audio or the full video, and it works with both regular videos and Shorts. More sources may be supported in future updates.
+![Liquid Glass Aesthetic](cover.jpg)
 
-- Download Spotify tracks, albums, and playlists
-- Download YouTube videos as audio (MP3) or video (MP4), including Shorts
-- Multiple audio format options: MP3, FLAC, M4A, OGG, OPUS, WAV
-- Automatic metadata tagging with cover art embedded
-- Clean desktop UI built with Tauri and SvelteKit
+## Features
 
-![Ember UI](assets/screenshot.png)
-
----
-
-## Tested Platforms
-
-- Windows ✅
-- Linux ✅
-- macOS ⚠️ Untested
-
-Ember is built using cross-platform technologies (Python, Tauri, and SvelteKit), but only Windows and Linux have been tested so far.
-
----
+- **Liquid Glass Aesthetic**: A deeply immersive, modern UI featuring pure glassmorphism, floating ambient orbs, and buttery smooth physics-based micro-animations.
+- **The "Pulse & Sweep" Progress Engine**: A completely overhauled, byte-by-byte smooth progress bar featuring sweeping light beams, pulsating red shadows, and a continuous sine-wave DNA flow animation.
+- **Intelligent Pathfinder**: Feed Ember *any* Spotify Track, Album, or Playlist link. It parses the metadata, queries the Spotify API, and enriches it instantly.
+- **Flawless Audio Mapping**: Ember's enrichment engine automatically maps Spotify metadata to the exact corresponding high-quality YouTube audio stream using a dual search-and-verify algorithm.
+- **Concurrent Batch Processing**: Download massive 100+ track playlists in parallel. The python worker pool manages throttling, chunking, and file writing synchronously while keeping the UI perfectly responsive.
+- **Automatic ID3 Tagging**: Downloads and embeds high-resolution cover art, artist tags, album info, and track numbers directly into the `.mp3` or `.m4a` files.
+- **Direct YouTube Video Support**: Not just for Spotify. Paste any YouTube video or Shorts link and select from 1080p MP4 or high-bitrate MP3 extraction.
 
 ## Architecture
-Ember started as a pure Python application. The backend (everything from resolving Spotify metadata to downloading and tagging audio) was already built in Python, making use of libraries like yt-dlp, mutagen, and requests that have no real equivalent in Rust. Rather than rewrite any of that, a Tauri frontend was added on top as a desktop UI wrapper, with SvelteKit handling the interface.
 
-The two sides communicate over HTTP on localhost:8008. When you interact with the UI, the Tauri frontend sends requests to a FastAPI server running in the background as a local Python process. The Rust layer starts and manages that Python process on launch, and shuts it down cleanly when the app closes.
+Ember leverages a two-tier architecture:
+1. **Frontend (Tauri + Svelte)**: A highly optimized, reactive user interface with custom CSS animations and a zero-dependency design system.
+2. **Backend (Python)**: A robust sidecar executable running a FastAPI-based local API, utilizing `yt-dlp` for raw extraction, `mutagen` for ID3 tagging, and `playwright`/`selenium` driven GraphQL scraping for metadata enrichment.
 
-This means the Python backend handles all the heavy work, and the frontend is purely responsible for what you see and interact with.
+## Virtual Environment Setup (Required)
 
----
+Before building from source or running the development server, you **must** set up a Python virtual environment. Ember's development mode explicitly looks for a `.venv` folder to spawn the backend.
 
-## Prerequisites
-
-- Python 3.13
-- Node.js and npm (latest)
-- Rust and Cargo (stable)
-
-### Windows Development
-
-If you are building Ember from source on Windows, Rust requires the Microsoft Visual C++ Build Tools (MSVC).
-
-Install either:
-
-- Visual Studio Community with the Desktop Development with C++ workload
-- Visual Studio Build Tools with the MSVC toolchain
-
-### Browser
-A Chromium-based browser is required for Spotify authentication.
-
-Supported browsers include:
-
-- Brave (recommended)
-- Chrome
-- Chromium
-- Microsoft Edge
-
-You must be logged into Spotify in one of these browsers before launching Ember.
-
----
-
-## How Authentication Works
-Ember never asks you to enter your Spotify username or password. Instead, it borrows the login session you already have in your browser.
-
-When Ember starts up, it may briefly open a browser tab to access Spotify's web player and retrieve the authentication token used by Spotify's website. The token is cached locally and is typically refreshed about once per hour.
-
-If for any reason that process fails, Ember falls back to Spotify's public embed player, which works without any login at all. The embed fallback gives slightly less metadata but still gets the job done for most tracks.
-
-The only thing required from you is that you are logged into Spotify in your browser before launching Ember.
-
----
-
-## Setup
-
-Clone the repository:
-```
-git clone https://github.com/shikhar0x/ember
-cd ember
-```
-
-Create a virtual environment and install Python dependencies:
-```
+```bash
+# 1. Create the virtual environment
 python -m venv .venv
-```
-On Linux/macOS:
-```
-source .venv/bin/activate
-```
-On Windows:
-```
+
+# 2. Activate it
+# On Windows:
 .venv\Scripts\activate
-```
-```
+# On Linux/macOS:
+source .venv/bin/activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
 ```
 
-Install frontend dependencies:
-```
-cd tauri-app
-npm install
-```
+## Building from Source
 
-**Running the app**
+To compile the application into a standalone installer, ensure your virtual environment is **active**.
 
-There are two ways to run Ember:
+### Windows
+1. **Build the Python Backend** (Requires PyInstaller):
+   ```bash
+   pyinstaller ember-backend.spec
+   ```
+   This creates a standalone sidecar executable `ember-backend.exe` in the `dist/` directory.
 
-Option 1 - Python GUI (simpler):
-```
-python gui_app.py
-```
-This launches the full app in a single command. The backend starts automatically.
+2. **Build the Tauri Frontend**:
+   ```bash
+   cd tauri-app
+   npm install
+   npm run tauri build
+   ```
+   Tauri will automatically bundle the backend executable and generate both a standalone `.exe` and an `.msi` installer for you.
 
-Option 2 - Tauri UI:
-Start the Tauri frontend:
-```
+### Linux & macOS (Untested)
+1. **Build the Python Backend** (Requires PyInstaller):
+   ```bash
+   pyinstaller ember-backend.spec
+   ```
+   This creates a standalone binary `ember-backend` (without an extension) in the `dist/` directory.
+
+2. **Update Tauri Config**:
+   Open `tauri-app/src-tauri/tauri.conf.json` and change the `resources` array to point to the extensionless binary:
+   ```json
+   "resources": [
+     "../../dist/ember-backend"
+   ]
+   ```
+
+3. **Build the Tauri Frontend**:
+   ```bash
+   cd tauri-app
+   npm install
+   npm run tauri build
+   ```
+   Tauri will bundle the backend and generate an `.AppImage` and `.deb` package on Linux, or an `.app` and `.dmg` on macOS.
+
+## Development
+
+To run the app in development mode with hot-reloading:
+
+```bash
 cd tauri-app
 npm run tauri dev
 ```
 
-
 ---
-
-## Usage
-
-1. Launch Ember using either method from the Setup section.
-2. Paste a Spotify or YouTube link into the input field and press Enter or click Inspect.
-3. Ember will fetch the metadata and show you the track, album, or playlist details.
-4. For Spotify, choose your preferred audio format from the dropdown: MP3, FLAC, M4A, OGG, OPUS, or WAV.
-5. For YouTube, choose between audio only (MP3) or full video (MP4), and select a quality.
-6. Click Download and wait for it to finish.
-
-Downloaded files are saved to `~/Downloads/Ember/` by default. Playlists and albums get their own subfolder, for example `~/Downloads/Ember/My Playlist/`.
-
----
-
-## Project Structure
-
-```
-Ember/
-├── core/                  # Python backend: API, downloaders, metadata, and resolvers
-│   ├── api/               # FastAPI server, routes, schemas, and task registry
-│   ├── services/          # Download orchestration for Spotify, YouTube, and media
-│   └── ...                # Parsers, matchers, taggers, and utilities
-├── tauri-app/             # Tauri + SvelteKit desktop frontend
-│   ├── src/               # SvelteKit pages and components
-│   └── src-tauri/         # Rust layer that manages the Python process
-├── gui_app.py             # Standalone Python GUI, the simplest way to run Ember
-├── requirements.txt       # Python dependencies
-└── LICENSE.txt            # MIT License
-```
-
----
-
-## Known Limitations
-
-- **Private Spotify playlists are not supported.** The embed scraping method Ember uses cannot access private playlists. Make the playlist public before pasting the link.
-- **WAV downloads have no metadata.** The WAV format does not support standard metadata tags, so files downloaded in WAV will have no embedded title, artist, cover art, or any other info. Use MP3 or FLAC if metadata matters to you.
-- **Only Spotify and YouTube links are supported right now.** Instagram, Twitter, Reddit, SoundCloud, and Apple Music links do not work in the current version. Support for more sources may be added in future updates.
-- **Spotify's internal API may change.** Ember uses Spotify's private web API to fetch metadata quickly. If Spotify rotates certain internal values, the fast path may break temporarily and fall back to a slower method with slightly less accurate results. This can be fixed with a code update when it happens.
-
----
-
-## License
-
-Ember is licensed under the MIT License. See [LICENSE.txt](LICENSE.txt) for details.
+*Ember. Yours, forever.*
