@@ -1,30 +1,42 @@
 # Ember
 
-Ember is a desktop application built with Tauri, SvelteKit, and Python for downloading music. It uses a local Python backend API to process metadata and a modern frontend interface.
+A sleek desktop music downloader powered by Tauri, SvelteKit, and a Python backend. Paste a Spotify or YouTube link, and Ember handles the rest — metadata, matching, tagging, and downloading.
 
 ![Ember Interface](assets/cover.png)
+
+![Playlist View](assets/playlist.png)
 
 ## Features
 
 - **Modern Interface**: A glassmorphism-inspired UI with physics-based animations built using SvelteKit and TypeScript.
 - **Continuous Progress Tracking**: Real-time byte-level progress updates aggregated across concurrent downloads.
-- **Advanced GraphQL Scraping**: Directly interfaces with internal Spotify GraphQL endpoints to instantly harvest rich, structured metadata for Tracks, Albums, and Playlists, with the public embed API acting as a robust fallback.
-- **Audio Mapping**: Maps Spotify metadata to the corresponding YouTube audio stream using a dual search-and-verify algorithm.
-- **Concurrent Batch Processing**: Downloads multi-track playlists in parallel using a Python worker pool that manages throttling and chunking.
-- **Automatic ID3 Tagging**: Embeds high-resolution cover art, artist tags, album info, and track numbers into downloaded `.mp3` or `.m4a` files.
+- **Advanced GraphQL Scraping**: Directly interfaces with internal Spotify GraphQL endpoints to harvest rich, structured metadata for Tracks, Albums, and Playlists, with the public embed API as a fallback.
+- **ISRC-Based Audio Matching**: Uses International Standard Recording Codes (ISRC) to precisely match Spotify tracks to YouTube audio sources. When an exact ISRC match isn't available, a fuzzy title/artist scoring algorithm ranks candidates and only accepts results above a confidence threshold.
+- **Concurrent Batch Processing**: Downloads multi-track albums and playlists in parallel using a Python worker pool with throttling and chunking.
+- **Automatic ID3 Tagging**: Embeds high-resolution cover art, artist, album, track number, and ISRC into every downloaded file.
+- **Multiple Output Formats**: Supports MP3, FLAC, M4A, OGG, OPUS, and WAV.
 - **YouTube Support**: Direct extraction from YouTube video or Shorts links (MP4 or MP3).
 
-## Architecture & IPC Flow
+## Tech Stack
 
-Ember leverages a two-tier architecture:
+| Layer | Technology |
+|---|---|
+| Frontend | SvelteKit, TypeScript |
+| Desktop Shell | Tauri (Rust) |
+| Backend | Python, FastAPI |
+| Audio | yt-dlp, Mutagen, FFmpeg |
+| Metadata | Spotify GraphQL, ISRC lookup |
 
-1. **Frontend (Tauri + SvelteKit + TypeScript)**: A reactive user interface.
-2. **Backend (Python)**: A sidecar executable running a FastAPI-based local API on `127.0.0.1:8008`.
+## Architecture & Design Rationale
 
-**IPC Flow**: 
-The Tauri shell manages the lifecycle of the Python backend. Upon startup, Tauri verifies the backend is running by polling the `/health` endpoint. The frontend then communicates with the Python workers via HTTP requests to `localhost:8008`, while progress events are streamed back to the UI.
+Ember's entire download and tagging pipeline was built in Python first — leveraging `yt-dlp`, `Mutagen`, and dozens of other libraries that have no Rust equivalents. Rewriting all of that in Rust would have been impractical, so the architecture splits the work between two processes:
 
-*Note: The repository also contains a legacy CustomTkinter GUI. To run it, activate your virtual environment (`.venv\Scripts\activate` on Windows, or `source .venv/bin/activate` on Linux/macOS) and execute `python gui_app.py`. The Tauri frontend remains the modern, primary interface.*
+1. **Rust (Tauri)**: Manages the application window, spawns and monitors the Python backend, and handles OS-level process lifecycle (port cleanup, graceful shutdown).
+2. **Python (FastAPI)**: Runs as a sidecar process on `127.0.0.1:8008`, handling all metadata scraping, audio matching, downloading, and file tagging.
+
+The two sides communicate over localhost HTTP. On startup, Tauri polls the backend's `/health` endpoint until it responds, then the frontend issues requests directly to `localhost:8008`. Progress events stream back to the UI in real time.
+
+> **Note:** The repository also contains a legacy CustomTkinter GUI (`python gui_app.py`). The Tauri frontend is the primary, actively maintained interface.
 
 ## Prerequisites
 
@@ -56,7 +68,7 @@ xcode-select --install
 ```
 
 ### Browser
-A Chromium-based browser is required for Spotify authentication. Ember uses browser cookie extraction for `yt-dlp` and utilizes Playwright in `core/isrc.py` for ISRC token harvesting from `ifpi.org`.
+A Chromium-based browser is required for authentication. Ember reads session data from a supported browser to authorize metadata requests and audio extraction.
 
 Supported browsers include:
 - Brave (recommended)
