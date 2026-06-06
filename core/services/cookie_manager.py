@@ -70,29 +70,36 @@ def _open_folder(path: Path) -> None:
 
 def get_cookie_file() -> Optional[str]:
     """
-    Export Brave cookies to a Netscape cookie file if needed, then return the
-    path.  Returns None when no usable cookie file can be produced.
+    Export browser cookies to a Netscape cookie file if needed, then return the
+    path. Returns None when no usable cookie file can be produced.
+    Dynamically finds an installed browser (Brave, Chrome, Chromium, Edge).
     """
-                                                             
     if os.path.exists(_GHOST_COOKIE_PATH):
         age = time.time() - os.path.getmtime(_GHOST_COOKIE_PATH)
         if age < 1800:
             return _GHOST_COOKIE_PATH
 
-                                                            
+    from core.browser_finder import find_browser, BrowserNotFoundError
+    
+    try:
+        browser_info = find_browser()
+        browser_name = browser_info.name.lower()
+    except BrowserNotFoundError:
+        browser_name = "brave"  # Fallback
+        
     try:
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "cookiesfrombrowser": ("brave",),
+            "cookiesfrombrowser": (browser_name,),
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.cookiejar.save(_GHOST_COOKIE_PATH, ignore_discard=True)
         if os.path.exists(_GHOST_COOKIE_PATH) and os.path.getsize(_GHOST_COOKIE_PATH) > 0:
             return _GHOST_COOKIE_PATH
     except Exception as e:
-        print(f"[Cookies] Brave export failed: {e}")
+        print(f"[Cookies] {browser_name.title()} export failed: {e}")
 
                                                           
     if os.path.exists(_GHOST_COOKIE_PATH):
