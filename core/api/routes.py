@@ -228,9 +228,11 @@ def cancel_task(task_id: str):
 def warmup():
     """Trigger the background warmup sequence."""
     from core.spotify import _tm
+    from fastapi import HTTPException
+    
     if not getattr(_tm, "_warmup_done", False):
-        _tm.get_headers()
-        _tm._warmup_done = True
+        raise HTTPException(status_code=503, detail="Warming up")
+        
     return {"status": "ok"}
 
 

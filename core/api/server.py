@@ -67,6 +67,15 @@ async def lifespan(app: FastAPI):
     if _controller:
         _controller.shutdown()
 
+def _get_default_download_dir() -> Path:
+    if sys.platform == "win32":
+        base = Path(os.environ.get("USERPROFILE", Path.home())) / "Downloads"
+    else:
+        base = Path.home() / "Downloads"
+    path = base / "Ember"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
 def create_app(
     download_dir: Optional[Path] = None,
     controller: Optional[DownloadController] = None,
@@ -93,20 +102,14 @@ def create_app(
     )
     @_app.get("/health")
     async def health():
+        from core.spotify import _tm
+        from fastapi import HTTPException
+        if not getattr(_tm, "_warmup_done", False):
+            raise HTTPException(status_code=503, detail="Warming up")
         return {"ready": True}
 
     _app.include_router(router)
 
-                                                  
-    def _get_default_download_dir() -> Path:
-        if sys.platform == "win32":
-            base = Path(os.environ.get("USERPROFILE", Path.home())) / "Downloads"
-        else:
-            base = Path.home() / "Downloads"
-        path = base / "Ember"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-    
     _controller = controller or DownloadController(
         download_dir or _get_default_download_dir()
     )
