@@ -1,10 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import imageio_ffmpeg
 
 a = Analysis(
     ['core/api/server.py'],
     pathex=[],
-    binaries=[],
+    binaries=[
+        (imageio_ffmpeg.get_ffmpeg_exe(), ".")
+    ],
     datas=[],
     hiddenimports=['selenium', 'selenium.webdriver', 'selenium.webdriver.chrome', 'selenium.webdriver.chrome.webdriver'],
     hookspath=[],
