@@ -12,6 +12,7 @@ dist/
 
 # Tauri / Rust build
 **/target/
+tauri.build.conf.json
 
 # Node
 node_modules/
