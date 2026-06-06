@@ -330,7 +330,7 @@ class Ember(ctk.CTk):
         """Zero-latency startup sequence."""
         try:
             from core.spotify_client import get_track, get_isrc
-            from core.token_manager import _tm
+            from core.spotify import _tm
             import time
             
             home = self.frames["HomeFrame"]
