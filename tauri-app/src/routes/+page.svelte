@@ -119,7 +119,7 @@
 
     // Attempt to start the backend via Tauri
     // Since this runs after onMount, the UI is already fully rendered!
-    if (window.__TAURI_INTERNALS__) {
+    if ('__TAURI_INTERNALS__' in window) {
         invoke('init_backend').then(() => {
             attemptWarmup();
         }).catch(console.error);
