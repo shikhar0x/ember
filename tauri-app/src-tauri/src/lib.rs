@@ -204,14 +204,24 @@ fn stop_backend() {
     }
 }
 
+#[tauri::command]
+fn init_backend(app: tauri::AppHandle) {
+    let guard = BACKEND_CHILD.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    if guard.is_some() {
+        return;
+    }
+    drop(guard);
+    
+    std::thread::spawn(move || {
+        start_backend(&app);
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
-            start_backend(app.handle());
-            Ok(())
-        })
+        .invoke_handler(tauri::generate_handler![init_backend])
         .run(tauri::generate_context!());
 
     stop_backend();

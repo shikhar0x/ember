@@ -29,7 +29,7 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "../../dist/ember-backend.exe"
+      "../../dist/ember-backend"
     ],
     "icon": [
       "icons/32x32.png",

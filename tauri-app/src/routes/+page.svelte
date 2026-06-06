@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
 
   // ── State ──────────────────────────────────────────────────────────────────
   let url = "";
@@ -102,9 +103,26 @@
   onMount(() => {
     isWarmup = true;
     statusText = "System active...";
-    fetch(`${API_BASE}/warmup`, { method: "POST" })
-      .then(() => { isWarmup = false; if (!isDownloading) statusText = "Ready"; })
-      .catch(() => { isWarmup = false; statusText = "Ready"; });
+    
+    // Attempt to start the backend via Tauri
+    // Since this runs after onMount, the UI is already fully rendered!
+    if (window.__TAURI_INTERNALS__) {
+        invoke('init_backend').catch(console.error);
+    }
+    
+    // Poll the backend until it's responsive
+    function attemptWarmup() {
+      fetch(`${API_BASE}/warmup`, { method: "POST" })
+        .then(res => {
+          if (!res.ok) throw new Error("not ready");
+          isWarmup = false; 
+          if (!isDownloading) statusText = "Ready";
+        })
+        .catch(() => {
+          setTimeout(attemptWarmup, 1000);
+        });
+    }
+    attemptWarmup();
   });
 
   // ── Fetch track info (inspect step) ───────────────────────────────────────
@@ -799,7 +817,7 @@
   }
   .content-wrapper.wide {
     position: absolute;
-    inset: 2rem;
+    inset: 2rem 2.4rem 2rem 2rem;
     max-width: none;
     width: auto;
     padding: 0;
@@ -915,7 +933,7 @@
     position: absolute; inset: 0;
     background: linear-gradient(135deg, rgba(225,29,46,0.9) 0%, rgba(255,85,85,1) 50%, rgba(225,29,46,0.9) 100%);
     background-size: 200% 200%;
-    opacity: 0; transition: opacity .3s ease;
+    opacity: 0; transition: opacity .5s ease-in-out;
     animation: btn-gradient-shift 3s infinite linear;
   }
   @keyframes btn-gradient-shift {
@@ -1006,7 +1024,7 @@
     transform: scale(1) translateY(0);
     transition: opacity 0.28s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
     animation: detailsIntro 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
-    overflow: hidden;
+    overflow: visible;
   }
 
   @keyframes detailsIntro {
@@ -1046,7 +1064,7 @@
     display: flex; flex-direction: column;
     gap: .75rem; min-width: 0;
     height: 100%;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .meta-header {
@@ -1077,6 +1095,7 @@
     gap: .6rem; 
     margin-top: auto; 
     flex-shrink: 0;
+    padding-bottom: 6px;
   }
 
   .back-btn {
@@ -1087,6 +1106,7 @@
     padding: .35rem .9rem; border-radius: 8px;
     box-shadow: none;
     align-self: flex-start;
+    margin-left: 6px;
     margin-bottom: .25rem;
     flex-shrink: 0;
   }
