@@ -104,12 +104,6 @@
     isWarmup = true;
     statusText = "System active...";
     
-    // Attempt to start the backend via Tauri
-    // Since this runs after onMount, the UI is already fully rendered!
-    if (window.__TAURI_INTERNALS__) {
-        invoke('init_backend').catch(console.error);
-    }
-    
     // Poll the backend until it's responsive
     function attemptWarmup() {
       fetch(`${API_BASE}/warmup`, { method: "POST" })
@@ -122,7 +116,16 @@
           setTimeout(attemptWarmup, 1000);
         });
     }
-    attemptWarmup();
+
+    // Attempt to start the backend via Tauri
+    // Since this runs after onMount, the UI is already fully rendered!
+    if (window.__TAURI_INTERNALS__) {
+        invoke('init_backend').then(() => {
+            attemptWarmup();
+        }).catch(console.error);
+    } else {
+        attemptWarmup();
+    }
   });
 
   // ── Fetch track info (inspect step) ───────────────────────────────────────

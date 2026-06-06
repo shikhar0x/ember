@@ -11,13 +11,29 @@ fn backend_child() -> &'static Mutex<Option<Child>> {
     BACKEND_CHILD.get_or_init(|| Mutex::new(None))
 }
 
-fn is_backend_running() -> bool {
+fn is_port_in_use() -> bool {
     // Quickly verify if the backend API server is actively listening on its port
     TcpStream::connect_timeout(
         &"127.0.0.1:8008".parse().unwrap(),
         Duration::from_millis(500),
     )
     .is_ok()
+}
+
+fn is_backend_ready() -> bool {
+    use std::io::{Write, Read};
+    if let Ok(mut stream) = TcpStream::connect_timeout(
+        &"127.0.0.1:8008".parse().unwrap(),
+        Duration::from_millis(500),
+    ) {
+        if stream.write_all(b"GET /health HTTP/1.0\r\n\r\n").is_ok() {
+            let mut response = String::new();
+            if stream.read_to_string(&mut response).is_ok() {
+                return response.contains("200 OK");
+            }
+        }
+    }
+    false
 }
 
 
@@ -116,13 +132,6 @@ fn kill_backend_port(port: u16) {
 
 #[allow(unused_variables)]
 fn start_backend(app: &tauri::AppHandle) {
-    // Purge orphaned backend instances to ensure a clean state and prevent deadlocks
-    if is_backend_running() {
-        println!("Detected existing backend on port 8008 — killing zombie session...");
-        kill_backend_port(8008);
-        std::thread::sleep(Duration::from_millis(500));
-    }
-
     println!("Starting Ember backend...");
 
     #[cfg(debug_assertions)]
@@ -180,8 +189,8 @@ fn start_backend(app: &tauri::AppHandle) {
     *backend_child().lock().unwrap() = Some(child);
 
     let mut started = false;
-    for _ in 0..20 {
-        if is_backend_running() {
+    for _ in 0..60 {
+        if is_backend_ready() {
             println!("Backend ready!");
             started = true;
             break;
@@ -190,7 +199,7 @@ fn start_backend(app: &tauri::AppHandle) {
     }
 
     if !started {
-        println!("Backend did not become ready after 10 seconds.");
+        println!("Backend did not become ready after 30 seconds.");
     }
 }
 
@@ -205,16 +214,32 @@ fn stop_backend() {
 }
 
 #[tauri::command]
-fn init_backend(app: tauri::AppHandle) {
+async fn init_backend(app: tauri::AppHandle) -> Result<(), String> {
     let guard = BACKEND_CHILD.get_or_init(|| Mutex::new(None)).lock().unwrap();
     if guard.is_some() {
-        return;
+        return Ok(());
     }
     drop(guard);
+    
+    // Purge orphaned backend instances synchronously so frontend waits
+    if is_port_in_use() {
+        println!("Detected existing backend on port 8008 — killing zombie session...");
+        kill_backend_port(8008);
+        
+        // Wait for the OS to actually free the port
+        for _ in 0..10 {
+            if !is_port_in_use() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
     
     std::thread::spawn(move || {
         start_backend(&app);
     });
+    
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
