@@ -282,8 +282,14 @@ class Ember(ctk.CTk):
         self._thumb_pool = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 
                                                             
-        from core.api.server import start_background
-        start_background(controller=self.download_controller)
+        def _boot_backend():
+            try:
+                from core.api.server import start_background
+                start_background(controller=self.download_controller)
+            except Exception as e:
+                print(f"Failed to start background: {e}")
+
+        threading.Thread(target=_boot_backend, daemon=True).start()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
