@@ -111,7 +111,7 @@ To compile the application into a standalone installer, ensure your virtual envi
    ```bash
    cd tauri-app
    npm install
-   npm run tauri build
+   npm run tauri:build
    ```
    Tauri will bundle the backend executable and generate both a standalone `.exe` and an `.msi` installer.
 
@@ -124,19 +124,11 @@ Ember's rust core has full Unix process management support (using `ss`/`lsof` fo
    ```
    This creates a standalone binary `ember-backend` (without an extension) in the `dist/` directory.
 
-2. **Update Tauri Config**:
-   Open `tauri-app/src-tauri/tauri.conf.json` and change the `resources` array to point to the extensionless binary:
-   ```json
-   "resources": [
-     "../../dist/ember-backend"
-   ]
-   ```
-
-3. **Build the Tauri Frontend**:
+2. **Build the Tauri Frontend**:
    ```bash
    cd tauri-app
    npm install
-   npm run tauri build
+   npm run tauri:build
    ```
    Tauri will bundle the backend and generate `.AppImage` / `.deb` / `.rpm` packages on Linux, or `.app` / `.dmg` on macOS.
 
