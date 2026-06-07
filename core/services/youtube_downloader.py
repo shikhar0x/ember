@@ -36,6 +36,20 @@ def download_generic(
 
     cookie_file = get_cookie_file()
 
+    def get_ffmpeg_dir():
+        import shutil, os, glob
+        if shutil.which("ffmpeg"): return None
+        if os.name == "nt":
+            local_app_data = os.environ.get("LOCALAPPDATA")
+            if local_app_data:
+                pattern = os.path.join(local_app_data, "Microsoft", "WinGet", "Packages", "Gyan.FFmpeg*", "*", "bin", "ffmpeg.exe")
+                matches = glob.glob(pattern)
+                if matches: return os.path.dirname(matches[0])
+        return None
+
+    ffmpeg_dir = get_ffmpeg_dir()
+    ffmpeg_exe = os.path.join(ffmpeg_dir, "ffmpeg.exe") if ffmpeg_dir else "ffmpeg"
+
     import threading
     prog_lock = threading.Lock()
     progress_state = {"video": 0.0, "audio": 0.0}
@@ -60,7 +74,10 @@ def download_generic(
                         
                 with prog_lock:
                     progress_state[stream_type] = prog_val
-                    mean_prog = (progress_state["video"] + progress_state["audio"]) / 2.0
+                    if "Audio" in fmt:
+                        mean_prog = progress_state["audio"]
+                    else:
+                        mean_prog = (progress_state["video"] + progress_state["audio"]) / 2.0
                     
                 emit(callback, progress_event(mean_prog, f"Downloading: {int(mean_prog * 100)}%"))
         return _hook
@@ -79,6 +96,7 @@ def download_generic(
                 "format": "bestaudio[abr>=192]/bestaudio[abr>=160]/bestaudio/best",
                 "prefer_ffmpeg": True,
                 "progress_hooks": [make_hook("audio")],
+                "postprocessor_hooks": [lambda d: emit(callback, progress_event(1.0, "Converting to MP3...")) if d["status"] == "started" else None],
                 "postprocessors": [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
@@ -88,6 +106,7 @@ def download_generic(
                     "ffmpeg": ["-vn", "-ar", "44100", "-ac", "2", "-b:a", "320k"]
                 },
             }
+            if ffmpeg_dir: ydl_opts["ffmpeg_location"] = ffmpeg_dir
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([data["url"]])
 
@@ -116,6 +135,7 @@ def download_generic(
                     "format": format_selector,
                     "progress_hooks": [make_hook(stream_type)],
                 }
+                if ffmpeg_dir: opts["ffmpeg_location"] = ffmpeg_dir
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     ydl.download([data["url"]])
 
@@ -137,7 +157,7 @@ def download_generic(
             aud_file = aud_files[0]
 
             merge_cmd = [
-                "ffmpeg", "-y",
+                ffmpeg_exe, "-y",
                 "-i", vid_file,
                 "-i", aud_file,
                 "-c", "copy",

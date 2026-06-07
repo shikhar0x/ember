@@ -17,6 +17,7 @@ _CODEC_EXT = {
 
 
 def fetch_audio(video_id: str, output_dir: str = "downloads", progress_hook=None,
+                postprocessor_hook=None,
                 audio_codec: str = "mp3", audio_quality: str = "320") -> dict:
     os.makedirs(output_dir, exist_ok=True)
 
@@ -49,6 +50,8 @@ def fetch_audio(video_id: str, output_dir: str = "downloads", progress_hook=None
 
     if progress_hook:
         base_opts["progress_hooks"] = [progress_hook]
+    if postprocessor_hook:
+        base_opts["postprocessor_hooks"] = [postprocessor_hook]
 
     url = f"https://www.youtube.com/watch?v={video_id}"
 

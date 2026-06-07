@@ -71,8 +71,18 @@ def download_track(
             if d["status"] == "downloading" and callback:
                 total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
                 downloaded = d.get("downloaded_bytes", 0)
-                pct = downloaded / total if total else 0.0
-                emit(callback, progress_event(pct, f"Downloading: {int(pct*100)}%"))
+                if total > 0:
+                    raw_pct = float(downloaded) / float(total)
+                else:
+                    p_str = d.get("_percent_str", "0%")
+                    import re
+                    p_str_clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', p_str)
+                    p_num = "".join(c for c in p_str_clean if c.isdigit() or c == ".")
+                    try:
+                        raw_pct = float(p_num) / 100.0 if p_num else 0.0
+                    except ValueError:
+                        raw_pct = 0.0
+                emit(callback, progress_event(raw_pct, f"Downloading: {int(raw_pct*100)}%"))
 
         result = None
         for c in candidates:
