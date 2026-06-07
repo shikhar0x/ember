@@ -48,13 +48,17 @@ def _start_token_warmup_thread() -> None:
     def warmup():
         try:
             from core.spotify import _tm
-
-            if not getattr(_tm, "_warmup_done", False):
-                print("[Startup] Beginning Spotify token warmup...")
-                _tm.get_headers()
-                _tm._warmup_done = True
-                print("[Startup] Spotify token warmup complete.")
+            _tm._warmup_done = False
+            print("[Startup] Beginning Spotify token warmup...")
+            _tm.get_headers()
+            _tm._warmup_done = True
+            print("[Startup] Spotify token warmup complete.")
         except Exception as e:
+            try:
+                from core.spotify import _tm
+                _tm._warmup_done = False
+            except Exception:
+                pass
             print(f"[Startup] Spotify warmup failed: {e}")
 
     threading.Thread(target=warmup, daemon=True, name="spotify-warmup").start()

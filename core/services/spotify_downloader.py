@@ -53,7 +53,7 @@ def download_track(
     try:
                           
         # --- Ensure track is fully enriched before resolving ---
-        if not getattr(track, "_enriched", False) or not track.cover_url or not track.isrc:
+        if not getattr(track, "_enriched", False):
             from core.enrich import enrich_tracks, apply_enrichment_updates
             updates, _ = enrich_tracks([track])
             if updates:

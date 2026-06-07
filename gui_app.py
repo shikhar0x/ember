@@ -1079,14 +1079,6 @@ class DetailsFrame(ctk.CTkFrame):
                     state="normal", text="Download Media", text_color=["gray10", "#DCE4EE"]
                 ))
 
-                                                                              
-                                                                                 
-        if carousel.get("frames"):
-            self.controller.download_controller.download_media(
-                self.data, callback=_on_event
-            )
-            return
-
         self._api_submit("POST", "/download/media", body, _on_event)
 
     def on_selection_change(self):

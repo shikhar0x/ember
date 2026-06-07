@@ -181,23 +181,25 @@
   
   // Progressively fetch cover art and metadata for playlist items in the background
   async function enrichPlaylistTracks() {
-    for (let i = 0; i < playlistTracks.length; i++) {
-      if (playlistTracks[i].isrc) continue;
-      if (!playlistTracks[i].spotify_url?.includes("/track/")) continue;
-      
-      try {
-        const res = await fetch(`${API_BASE}/track/enrich`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(playlistTracks[i])
-        });
-        if (res.ok) {
-          playlistTracks[i] = await res.json();
-          playlistTracks = [...playlistTracks]; // Reassign array to trigger Svelte reactivity
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < playlistTracks.length; i += BATCH_SIZE) {
+      const batch = playlistTracks.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map((t, j) => {
+          if (t.isrc || !t.spotify_url?.includes("/track/")) return Promise.resolve(null);
+          return fetch(`${API_BASE}/track/enrich`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(t)
+          }).then(r => r.ok ? r.json() : null).catch(() => null);
+        })
+      );
+      results.forEach((result, j) => {
+        if (result.status === "fulfilled" && result.value) {
+          playlistTracks[i + j] = result.value;
         }
-      } catch (err) {
-        console.error("Enrich failed:", err);
-      }
+      });
+      playlistTracks = [...playlistTracks];
     }
   }
 
@@ -337,6 +339,7 @@
     let staleTicks = 0;
 
     async function poll() {
+      if (pollInterval !== null) { clearTimeout(pollInterval); pollInterval = null; }
       try {
         const res = await fetch(`${API_BASE}/task/${id}/events?cursor=${cursor}`);
         if (!res.ok) { stopPolling(); return; }

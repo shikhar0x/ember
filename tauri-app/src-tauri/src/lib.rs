@@ -147,10 +147,23 @@ fn start_backend(app: &tauri::AppHandle) {
         let server_path = root_dir.join("core").join("api").join("server.py");
         
         println!("[DEV MODE] Spawning raw Python backend...");
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            Command::new(python_path)
+                .env("PYTHONPATH", &root_dir)
+                .arg("-W").arg("ignore")
+                .arg(server_path)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .expect("Failed to start python backend in dev mode")
+        }
+        #[cfg(not(target_os = "windows"))]
         Command::new(python_path)
             .env("PYTHONPATH", &root_dir)
-            .arg("-W")
-            .arg("ignore")
+            .arg("-W").arg("ignore")
             .arg(server_path)
             .spawn()
             .expect("Failed to start python backend in dev mode")
@@ -168,19 +181,20 @@ fn start_backend(app: &tauri::AppHandle) {
         
         #[cfg(target_os = "windows")]
         let backend_path = resource_dir.join("ember-backend.exe");
+
         println!("[PROD MODE] Spawning compiled sidecar...");
+
         #[cfg(target_os = "windows")]
-        let mut child_cmd = {
+        {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
-            let mut cmd = Command::new(&backend_path);
-            cmd.creation_flags(CREATE_NO_WINDOW);
-            cmd
-        };
+            Command::new(&backend_path)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .expect("Failed to start bundled backend")
+        }
         #[cfg(not(target_os = "windows"))]
-        let mut child_cmd = Command::new(&backend_path);
-
-        child_cmd
+        Command::new(&backend_path)
             .spawn()
             .expect("Failed to start bundled backend")
     };
@@ -243,12 +257,14 @@ async fn init_backend(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![init_backend])
-        .run(tauri::generate_context!());
-
-    stop_backend();
-
-    app.expect("error while running tauri application");
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                stop_backend();
+            }
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

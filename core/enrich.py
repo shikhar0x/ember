@@ -5,7 +5,7 @@ Handles batch track enrichment using c.py's parallel Pathfinder + ISRC pipeline.
 Returns (updates, error) tuple — caller (GUI or CLI) applies mutations.
 """
 
-from core.spotify import _tm, _extract_track_id
+from core.spotify import _tm
 
 
 def enrich_tracks(tracks, session_checker=None):

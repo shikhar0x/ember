@@ -23,10 +23,9 @@ adapter = HTTPAdapter(
 _session.mount("https://", adapter)
 _session.mount("http://", adapter)
 
-from core.models import Track
 from typing import List
-from core.isrc import get_isrc
 from core.models import Track
+from core.isrc import get_isrc
 from core.spotify_client import TokenManager
 
 # ------------------------------------------------------------------ #

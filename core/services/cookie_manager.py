@@ -83,41 +83,44 @@ def get_cookie_file() -> Optional[str]:
     import browser_cookie3
 
     combined_jar = http.cookiejar.MozillaCookieJar(_GHOST_COOKIE_PATH)
-    browsers = [
-        browser_cookie3.firefox,
-        browser_cookie3.chrome,
-        browser_cookie3.brave,
-        browser_cookie3.chromium,
-        browser_cookie3.edge,
-    ]
+    def extract_domain(domain: str):
+        # 1. Brave (explicit path required on Windows sometimes)
+        for path in get_brave_cookie_paths():
+            if path.exists():
+                try:
+                    cj = browser_cookie3.brave(cookie_file=str(path), domain_name=domain)
+                    if domain == ".youtube.com" and any(c.name in ("LOGIN_INFO", "SAPISID", "__Secure-3PSID") for c in cj):
+                        return cj
+                    if domain == ".instagram.com" and any(c.name == "sessionid" for c in cj):
+                        return cj
+                except Exception:
+                    pass
 
-    # 1. Extract YouTube cookies
+        # 2. Fallbacks
+        for browser in [browser_cookie3.firefox, browser_cookie3.chrome, browser_cookie3.chromium, browser_cookie3.edge]:
+            try:
+                cj = browser(domain_name=domain)
+                if domain == ".youtube.com" and any(c.name in ("LOGIN_INFO", "SAPISID", "__Secure-3PSID") for c in cj):
+                    return cj
+                if domain == ".instagram.com" and any(c.name == "sessionid" for c in cj):
+                    return cj
+            except Exception:
+                pass
+        return []
+
+    # Extract YouTube cookies
     YT_ESSENTIALS = {
         "LOGIN_INFO", "SAPISID", "__Secure-3PSID", "__Secure-1PSID",
         "__Secure-1PAPISID", "__Secure-3PAPISID", "SID", "HSID",
         "SSID", "PREF", "YSC", "VISITOR_INFO1_LIVE"
     }
-    for browser in browsers:
-        try:
-            cj = browser(domain_name=".youtube.com")
-            if any(c.name in ("LOGIN_INFO", "SAPISID", "__Secure-3PSID") for c in cj):
-                for c in cj:
-                    if c.name in YT_ESSENTIALS:
-                        combined_jar.set_cookie(c)
-                break
-        except Exception:
-            pass
+    for c in extract_domain(".youtube.com"):
+        if c.name in YT_ESSENTIALS:
+            combined_jar.set_cookie(c)
 
-    # 2. Extract Instagram cookies
-    for browser in browsers:
-        try:
-            cj = browser(domain_name=".instagram.com")
-            if any(c.name == "sessionid" for c in cj):
-                for c in cj:
-                    combined_jar.set_cookie(c)
-                break
-        except Exception:
-            pass
+    # Extract Instagram cookies
+    for c in extract_domain(".instagram.com"):
+        combined_jar.set_cookie(c)
 
     try:
         combined_jar.save(ignore_discard=True, ignore_expires=True)
