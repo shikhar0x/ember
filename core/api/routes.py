@@ -337,3 +337,40 @@ def enrich_track(track_data: TrackSchema):
         source=t.source,
         media_type=t.media_type
     )
+
+
+# ── System ────────────────────────────────────────────────────────────────────
+
+@router.post("/system/clear-cache")
+def clear_cache():
+    """Clear in-memory caches, cookies, and tokens."""
+    import os
+    from core.spotify import _tm, _cache
+    from core.parser import _thumb_cache
+    from core.services.cookie_manager import _GHOST_COOKIE_PATH
+
+    _cache.clear()
+    _thumb_cache.clear()
+
+    with _tm._lock:
+        _tm._bearer = None
+        _tm._expires_at = 0
+        _tm._client_token = ""
+        _tm._client_token_expires_at = 0.0
+        if os.path.exists(_tm.CACHE_FILE):
+            try:
+                os.remove(_tm.CACHE_FILE)
+            except Exception:
+                pass
+
+    if os.path.exists(_GHOST_COOKIE_PATH):
+        try:
+            os.remove(_GHOST_COOKIE_PATH)
+        except Exception:
+            pass
+
+    # Restart the background warmup thread to re-harvest tokens!
+    from core.api.server import _start_token_warmup_thread
+    _start_token_warmup_thread()
+
+    return {"status": "ok"}
