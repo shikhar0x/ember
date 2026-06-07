@@ -128,6 +128,42 @@
     }
   });
 
+  // ── Clear Cache ────────────────────────────────────────────────────────────
+  let isClearing = false;
+  let clearSuccess = false;
+
+  async function clearCache() {
+    if (isClearing || isBusy) return;
+    isClearing = true;
+    clearSuccess = false;
+    try {
+      const res = await fetch(`${API_BASE}/system/clear-cache`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to clear cache");
+      clearSuccess = true;
+      setTimeout(() => { clearSuccess = false; }, 2000);
+      
+      // Trigger a warmup immediately after clearing to fetch fresh tokens
+      isWarmup = true;
+      statusText = "Re-initializing system...";
+      function attemptWarmup() {
+        fetch(`${API_BASE}/warmup`, { method: "POST" })
+          .then(res => {
+            if (!res.ok) throw new Error("not ready");
+            isWarmup = false; 
+            if (!isDownloading) statusText = "Ready";
+          })
+          .catch(() => {
+            setTimeout(attemptWarmup, 1000);
+          });
+      }
+      attemptWarmup();
+    } catch (err) {
+      console.error("Clear cache error:", err);
+    } finally {
+      isClearing = false;
+    }
+  }
+
   // ── Fetch track info (inspect step) ───────────────────────────────────────
   async function inspectUrl() {
     if (!url.trim() || isBusy) return;
@@ -432,10 +468,25 @@
 
     <!-- ── HEADER ────────────────────────────────────────────────────────── -->
     <header class:compact={isExpanding}>
-      <h1>Ember</h1>
-      {#if !isExpanding}
-        <p class="subtitle">Yours, forever.</p>
-      {/if}
+      <div class="header-inner">
+        <div class="header-text">
+          <h1>Ember</h1>
+          {#if !isExpanding}
+            <p class="subtitle">Yours, forever.</p>
+          {/if}
+        </div>
+        {#if !showDetails}
+          <button class="clear-cache-btn" onclick={clearCache} disabled={isClearing || isBusy} class:success={clearSuccess}>
+            {#if clearSuccess}
+              <span class="icon">✓</span><span class="btn-lbl">Cleared</span>
+            {:else if isClearing}
+              <span class="icon spinning">⟳</span><span class="btn-lbl">Clearing...</span>
+            {:else}
+              <span class="icon">⟳</span><span class="btn-lbl">Refresh System</span>
+            {/if}
+          </button>
+        {/if}
+      </div>
     </header>
 
     <!-- ── HOME CARD (URL input) ─────────────────────────────────────────── -->
@@ -832,11 +883,40 @@
   }
 
   /* ── Header ──────────────────────────────────────────────────────────────── */
-  header { text-align: center; margin-bottom: 2.5rem; transition: all 0.3s ease; }
-  header.compact {
-    margin-bottom: 1rem;
-    padding-top: 0;
+  header { margin-bottom: 2.5rem; transition: all 0.3s ease; }
+  header.compact { margin-bottom: 1rem; padding-top: 0; }
+
+  .header-inner {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
   }
+  
+  .header-text { text-align: center; flex: 1; }
+
+  .clear-cache-btn {
+    position: fixed; top: 20px; right: 20px;
+    display: flex; align-items: center; gap: 0.4rem;
+    background: rgba(31,40,51,0.5);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: #A0A4A8;
+    padding: 0.5rem 0.8rem;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem; font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    z-index: 100;
+  }
+  .clear-cache-btn:hover:not(:disabled) { 
+    background: rgba(225,29,46,0.15); color: #FFF; border-color: rgba(225,29,46,0.3); 
+    transform: scale(1.05);
+  }
+  .clear-cache-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .clear-cache-btn.success { background: rgba(46,204,113,0.15); color: #2ECC71; border-color: rgba(46,204,113,0.3); }
+  .icon.spinning { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { 100% { transform: rotate(360deg); } }
 
   h1 {
     font-family: 'Outfit', sans-serif;

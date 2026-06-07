@@ -9,7 +9,14 @@ a = Analysis(
         (imageio_ffmpeg.get_ffmpeg_exe(), ".")
     ],
     datas=[],
-    hiddenimports=['selenium', 'selenium.webdriver', 'selenium.webdriver.chrome', 'selenium.webdriver.chrome.webdriver'],
+    hiddenimports=[
+        'selenium', 'selenium.webdriver', 'selenium.webdriver.chrome',
+        'selenium.webdriver.chrome.webdriver',
+        'browser_cookie3',
+        'instaloader',
+        'playwright',
+        'playwright.sync_api',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
