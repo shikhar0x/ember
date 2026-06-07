@@ -10,7 +10,9 @@ const resourceFile = isWindows ? '../../dist/ember-backend.exe' : '../../dist/em
 
 const config = {
   bundle: {
-    resources: [resourceFile]
+    resources: {
+      [resourceFile]: isWindows ? "ember-backend.exe" : "ember-backend"
+    }
   }
 };
 

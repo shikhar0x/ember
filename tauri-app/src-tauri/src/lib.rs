@@ -163,12 +163,11 @@ fn start_backend(app: &tauri::AppHandle) {
             .resource_dir()
             .expect("Failed to get resource directory");
 
-        let backend_path = resource_dir
-            .join("_up_")
-            .join("_up_")
-            .join("dist")
-            .join("ember-backend");
-            
+        #[cfg(not(target_os = "windows"))]
+        let backend_path = resource_dir.join("ember-backend");
+        
+        #[cfg(target_os = "windows")]
+        let backend_path = resource_dir.join("ember-backend.exe");
         println!("[PROD MODE] Spawning compiled sidecar...");
         #[cfg(target_os = "windows")]
         let mut child_cmd = {
@@ -189,7 +188,7 @@ fn start_backend(app: &tauri::AppHandle) {
     *backend_child().lock().unwrap() = Some(child);
 
     let mut started = false;
-    for _ in 0..60 {
+    for _ in 0..120 {
         if is_backend_ready() {
             println!("Backend ready!");
             started = true;
@@ -199,7 +198,7 @@ fn start_backend(app: &tauri::AppHandle) {
     }
 
     if !started {
-        println!("Backend did not become ready after 30 seconds.");
+        println!("Backend did not become ready after 60 seconds.");
     }
 }
 

@@ -79,30 +79,52 @@ def get_cookie_file() -> Optional[str]:
         if age < 1800:
             return _GHOST_COOKIE_PATH
 
-    from core.browser_finder import find_browser, BrowserNotFoundError
-    
-    try:
-        browser_info = find_browser()
-        browser_name = browser_info.name.lower()
-    except BrowserNotFoundError:
-        browser_name = "brave"  # Fallback
-        
-    try:
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "cookiesfrombrowser": (browser_name,),
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.cookiejar.save(_GHOST_COOKIE_PATH, ignore_discard=True)
-        if os.path.exists(_GHOST_COOKIE_PATH) and os.path.getsize(_GHOST_COOKIE_PATH) > 0:
-            return _GHOST_COOKIE_PATH
-    except Exception as e:
-        print(f"[Cookies] {browser_name.title()} export failed: {e}")
+    import http.cookiejar
+    import browser_cookie3
 
-                                                          
-    if os.path.exists(_GHOST_COOKIE_PATH):
+    combined_jar = http.cookiejar.MozillaCookieJar(_GHOST_COOKIE_PATH)
+    browsers = [
+        browser_cookie3.firefox,
+        browser_cookie3.chrome,
+        browser_cookie3.brave,
+        browser_cookie3.chromium,
+        browser_cookie3.edge,
+    ]
+
+    # 1. Extract YouTube cookies
+    YT_ESSENTIALS = {
+        "LOGIN_INFO", "SAPISID", "__Secure-3PSID", "__Secure-1PSID",
+        "__Secure-1PAPISID", "__Secure-3PAPISID", "SID", "HSID",
+        "SSID", "PREF", "YSC", "VISITOR_INFO1_LIVE"
+    }
+    for browser in browsers:
+        try:
+            cj = browser(domain_name=".youtube.com")
+            if any(c.name in ("LOGIN_INFO", "SAPISID", "__Secure-3PSID") for c in cj):
+                for c in cj:
+                    if c.name in YT_ESSENTIALS:
+                        combined_jar.set_cookie(c)
+                break
+        except Exception:
+            pass
+
+    # 2. Extract Instagram cookies
+    for browser in browsers:
+        try:
+            cj = browser(domain_name=".instagram.com")
+            if any(c.name == "sessionid" for c in cj):
+                for c in cj:
+                    combined_jar.set_cookie(c)
+                break
+        except Exception:
+            pass
+
+    try:
+        combined_jar.save(ignore_discard=True, ignore_expires=True)
+    except Exception as e:
+        print(f"[Cookies] Failed to save combined cookie jar: {e}")
+    
+    if os.path.exists(_GHOST_COOKIE_PATH) and os.path.getsize(_GHOST_COOKIE_PATH) > 0:
         return _GHOST_COOKIE_PATH
 
     return None

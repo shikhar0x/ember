@@ -270,7 +270,8 @@ class InputParser:
             if result: return result
 
                                                                            
-        ghost_cookie_file = InputParser._export_ghost_cookies()
+        from core.services.cookie_manager import get_cookie_file
+        ghost_cookie_file = get_cookie_file()
 
         ydl_opts = {
             'quiet': True,
