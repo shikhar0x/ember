@@ -156,6 +156,8 @@ fn start_backend(app: &tauri::AppHandle) {
                 .env("PYTHONPATH", &root_dir)
                 .arg("-W").arg("ignore")
                 .arg(server_path)
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
                 .creation_flags(CREATE_NO_WINDOW)
                 .spawn()
                 .expect("Failed to start python backend in dev mode")
@@ -165,6 +167,8 @@ fn start_backend(app: &tauri::AppHandle) {
             .env("PYTHONPATH", &root_dir)
             .arg("-W").arg("ignore")
             .arg(server_path)
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
             .spawn()
             .expect("Failed to start python backend in dev mode")
     };

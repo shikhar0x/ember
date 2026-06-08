@@ -169,11 +169,18 @@ def get_registry() -> Optional[TaskRegistry]:
     return _registry
 
 if __name__ == "__main__":
+    import sys, os
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+
     app = create_app()
     uvicorn.run(
         app,
         host=DEFAULT_HOST,
         port=DEFAULT_PORT,
         log_level="critical",
-        access_log=False
+        access_log=False,
+        use_colors=False
     )
