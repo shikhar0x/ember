@@ -51,6 +51,15 @@ def _start_token_warmup_thread() -> None:
             _tm._warmup_done = False
             print("[Startup] Beginning Spotify token warmup...")
             _tm.get_headers()
+            # Validate: probe Spotify to catch server-side revocation
+            if not _tm._probe_token():
+                print("[Startup] Cached token stale — re-harvesting...")
+                with _tm._lock:
+                    _tm._bearer = None
+                    _tm._expires_at = 0
+                    _tm._client_token = ""
+                    _tm._client_token_expires_at = 0.0
+                _tm.get_headers()
             _tm._warmup_done = True
             print("[Startup] Spotify token warmup complete.")
         except Exception as e:

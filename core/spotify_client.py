@@ -220,6 +220,35 @@ class TokenManager:
             headers["client-token"] = self._client_token
         return headers
 
+    def _probe_token(self) -> bool:
+        """Validate the current bearer against Spotify's API (lightweight probe)."""
+        if not self._bearer:
+            return False
+        try:
+            r = self._session.post(
+                "https://api-partner.spotify.com/pathfinder/v1/query",
+                headers={
+                    "authorization": self._bearer,
+                    "app-platform": "WebPlayer",
+                    "User-Agent": "Mozilla/5.0",
+                    "content-type": "application/json",
+                },
+                json={
+                    "variables": {"uri": "spotify:track:0VjIjW4GlUZAMYd2vXMi3b"},
+                    "operationName": "getTrack",
+                    "extensions": {
+                        "persistedQuery": {
+                            "version": 1,
+                            "sha256Hash": SHA256,
+                        }
+                    },
+                },
+                timeout=10,
+            )
+            return r.status_code != 401
+        except Exception:
+            return True  # network error ≠ token problem
+
     class _ErrorResponse:
         """Structured error sentinel — mimics Response interface."""
         status_code = 0
@@ -239,11 +268,17 @@ class TokenManager:
                 r = self._session.request(method, url, timeout=10, **kwargs)
 
                 if r.status_code == 401 and attempt == 0:
-                    print("[TokenManager] Token rejected — re-harvesting...")
-                    self._bearer = None
-                    self._expires_at = 0
-                    self._client_token = ""
-                    self._client_token_expires_at = 0.0
+                    # Race-safe: only invalidate if no other thread already refreshed
+                    used_bearer = kwargs["headers"].get("authorization")
+                    with self._lock:
+                        if self._bearer == used_bearer:
+                            print("[TokenManager] Token rejected — re-harvesting...")
+                            self._bearer = None
+                            self._expires_at = 0
+                            self._client_token = ""
+                            self._client_token_expires_at = 0.0
+                        else:
+                            print("[TokenManager] Token already refreshed by another thread.")
                     kwargs["headers"] = self.get_headers()
                     continue
 
