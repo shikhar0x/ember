@@ -34,7 +34,7 @@ class TokenManager:
             self._session = session
         else:
             self._session = requests.Session()
-            adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
+            adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100)
             self._session.mount("https://", adapter)
             self._session.mount("http://", adapter)
         
@@ -261,7 +261,8 @@ class TokenManager:
             return {"error": True, "reason": self._reason}
 
     def request(self, method: str, url: str, **kwargs):
-        kwargs["headers"] = self.get_headers()
+        if "headers" not in kwargs:
+            kwargs["headers"] = self.get_headers()
 
         for attempt in range(2):
             try:
@@ -275,8 +276,6 @@ class TokenManager:
                             print("[TokenManager] Token rejected — re-harvesting...")
                             self._bearer = None
                             self._expires_at = 0
-                            self._client_token = ""
-                            self._client_token_expires_at = 0.0
                         else:
                             print("[TokenManager] Token already refreshed by another thread.")
                     kwargs["headers"] = self.get_headers()
