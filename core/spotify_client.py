@@ -292,6 +292,17 @@ class TokenManager:
 
         return self._ErrorResponse("All retries exhausted")
 
+    def raw_request(self, method: str, url: str, headers: dict, **kwargs):
+        """Fire a request with pre-resolved headers (no lock, no get_headers)."""
+        try:
+            r = self._session.request(method, url, headers=headers, timeout=10, **kwargs)
+            if r.status_code == 401:
+                # Fallback: full retry path with re-harvest
+                return self.request(method, url, **kwargs)
+            return r
+        except Exception as e:
+            return self._ErrorResponse(str(e))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 
