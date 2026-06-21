@@ -613,6 +613,13 @@ def normalize_playlist(
         except (KeyError, AttributeError):
             continue
 
+    image_items = playlist.get("images", {}).get("items", [])
+    playlist_cover = ""
+    if image_items:
+        playlist_cover = largest_cover(
+            image_items[0].get("sources", [])
+        )
+
     return {
 
         "uri":
@@ -628,6 +635,9 @@ def normalize_playlist(
             owner.get(
                 "name"
             ),
+
+        "cover_url":
+            playlist_cover,
 
         "total_tracks":
             content.get(

@@ -183,6 +183,7 @@ def artist_markdown(
         "|---------|---------|",
         f"| Monthly Listeners | {artist['monthly_listeners']} |",
         f"| URI | {artist['uri']} |",
+        f"| Cover | {artist.get('avatar', '')} |",
         "",
     ]
 
@@ -214,6 +215,7 @@ def playlist_markdown(
         f"| Description | {playlist['description']} |",
         f"| Tracks | {playlist['total_tracks']} |",
         f"| URI | {playlist['uri']} |",
+        f"| Cover | {playlist.get('cover_url', '')} |",
         "",
     ]
 
