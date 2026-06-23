@@ -9,7 +9,7 @@ from mutagen.id3 import (
     TPE2,                 
     TALB,          
     TRCK,                 
-    TDRC,         
+    TYER,         
     TCON,          
     TSRC,   # ISRC
 )
@@ -52,9 +52,8 @@ def _tag_mp3(track, file_path: str, cover_bytes: bytes | None) -> None:
 
     tags = audio.tags
 
-    # ---- Clear existing ----
-    for tag in ["TIT2", "TPE1", "TPE2", "TALB", "TRCK", "TDRC", "TCON", "APIC:"]:
-        tags.delall(tag)
+    # ---- Nuclear clear: wipe all frames for a clean slate ----
+    tags.clear()
 
     # ---- Title ----
     tags.add(TIT2(encoding=3, text=track.title))
@@ -70,7 +69,7 @@ def _tag_mp3(track, file_path: str, cover_bytes: bytes | None) -> None:
 
     # ---- Track number ----
     if track.track_number is not None:
-        if track.total_tracks is not None:
+        if track.total_tracks:
             trck = f"{track.track_number}/{track.total_tracks}"
         else:
             trck = str(track.track_number)
@@ -78,7 +77,7 @@ def _tag_mp3(track, file_path: str, cover_bytes: bytes | None) -> None:
 
     # ---- Year ----
     if track.year:
-        tags.add(TDRC(encoding=3, text=track.year))
+        tags.add(TYER(encoding=3, text=[str(track.year)]))
 
     # ---- Genre ----
     if track.genre:
@@ -103,7 +102,7 @@ def _tag_mp3(track, file_path: str, cover_bytes: bytes | None) -> None:
                 data=cover_bytes
             )
         )
-    audio.save(v2_version=3)
+    audio.save(v2_version=3, v1=0)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -112,16 +111,19 @@ def _tag_mp3(track, file_path: str, cover_bytes: bytes | None) -> None:
 def _tag_flac(track, file_path: str, cover_bytes: bytes | None) -> None:
     audio = FLAC(file_path)
 
+    # ---- Clear all existing tags for a clean slate ----
+    audio.clear()
+
     audio["title"] = track.title
     audio["artist"] = ", ".join(track.artists)
     if track.album:
         audio["album"] = track.album
     if track.track_number is not None:
         audio["tracknumber"] = str(track.track_number)
-        if track.total_tracks is not None:
+        if track.total_tracks:
             audio["tracktotal"] = str(track.total_tracks)
     if track.year:
-        audio["date"] = track.year
+        audio["date"] = str(track.year)
     if track.genre:
         audio["genre"] = track.genre
     if hasattr(track, 'isrc') and track.isrc:
@@ -154,7 +156,7 @@ def _tag_m4a(track, file_path: str, cover_bytes: bytes | None) -> None:
         total = track.total_tracks or 0
         audio["trkn"] = [(track.track_number, total)]
     if track.year:
-        audio["\xa9day"] = [track.year]
+        audio["\xa9day"] = [str(track.year)]
     if track.genre:
         audio["\xa9gen"] = [track.genre]
 
@@ -170,16 +172,19 @@ def _tag_m4a(track, file_path: str, cover_bytes: bytes | None) -> None:
 def _tag_ogg(track, file_path: str, cover_bytes: bytes | None) -> None:
     audio = OggVorbis(file_path)
 
+    # ---- Clear all existing tags for a clean slate ----
+    audio.clear()
+
     audio["title"] = [track.title]
     audio["artist"] = [", ".join(track.artists)]
     if track.album:
         audio["album"] = [track.album]
     if track.track_number is not None:
         audio["tracknumber"] = [str(track.track_number)]
-        if track.total_tracks is not None:
+        if track.total_tracks:
             audio["tracktotal"] = [str(track.total_tracks)]
     if track.year:
-        audio["date"] = [track.year]
+        audio["date"] = [str(track.year)]
     if track.genre:
         audio["genre"] = [track.genre]
     if hasattr(track, 'isrc') and track.isrc:
@@ -202,16 +207,19 @@ def _tag_ogg(track, file_path: str, cover_bytes: bytes | None) -> None:
 def _tag_opus(track, file_path: str, cover_bytes: bytes | None) -> None:
     audio = OggOpus(file_path)
 
+    # ---- Clear all existing tags for a clean slate ----
+    audio.clear()
+
     audio["title"] = [track.title]
     audio["artist"] = [", ".join(track.artists)]
     if track.album:
         audio["album"] = [track.album]
     if track.track_number is not None:
         audio["tracknumber"] = [str(track.track_number)]
-        if track.total_tracks is not None:
+        if track.total_tracks:
             audio["tracktotal"] = [str(track.total_tracks)]
     if track.year:
-        audio["date"] = [track.year]
+        audio["date"] = [str(track.year)]
     if track.genre:
         audio["genre"] = [track.genre]
     if hasattr(track, 'isrc') and track.isrc:

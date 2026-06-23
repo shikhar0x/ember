@@ -111,6 +111,9 @@ def apply_enrichment_updates(updates):
         if full.get("isrc") and not target.isrc:
             target.isrc = full["isrc"]
             changed = True
+        if full.get("year") and not getattr(target, "year", None):
+            target.year = full["year"]
+            changed = True
         target._enriched = True
         if changed:
             modified.append(target)

@@ -143,12 +143,8 @@ class DownloadController:
         succeeded = 0
         failed    = 0
 
-        # Batch enrich all tracks before downloading to instantly grab ISRCs
-        from core.enrich import enrich_tracks, apply_enrichment_updates
-        updates, _ = enrich_tracks(tracks)
-        if updates:
-            apply_enrichment_updates(updates)
-
+        # Tracks will now individually enrich themselves inside their own worker thread
+        # just-in-time before downloading. This dramatically improves time-to-first-download.
         # Synchronously ensure output dir exists
         pl_dir.mkdir(parents=True, exist_ok=True)
 

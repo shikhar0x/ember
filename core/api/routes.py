@@ -257,43 +257,228 @@ def _track_to_info(t) -> TrackInfoResponse:
     )
 
 
-@router.get("/track/info", response_model=InspectResponse)
-def get_track_info(url: str):
-    """Fetch metadata for a Spotify URL — works for tracks, albums, and playlists."""
-    from core.parser import InputParser
-    try:
-        items = InputParser.parse(url)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+@router.get("/inspect")
+def inspect_url(url: str):
+    from fastapi.responses import StreamingResponse
+    import json
+    import threading
+    import concurrent.futures
+    import traceback
+    import requests
+    from requests.adapters import HTTPAdapter
 
-    if not items:
-        raise HTTPException(status_code=404, detail="Could not resolve URL")
+    from core.spotify import _tm
+    from core.spotify_client import get_track, get_playlist_generator
+    from sdk.isrc import get_track_isrc
+    from core.spotify_client import get_playlist_generator
 
-                  
-    if len(items) == 1:
-        return InspectResponse(
-            type="track",
-            track=_track_to_info(items[0]),
-        )
+    def stream():
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=20)
+        futures = {}
+        
+        session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
+        session.mount("https://", adapter)
 
-                                         
-    t0 = items[0]
-    parent_title = getattr(t0, "parent_name", None) or getattr(t0, "album", None) or "Playlist"
-    parent_owner = getattr(t0, "parent_owner", None) or "Spotify"
-    parent_cover = getattr(t0, "parent_cover", None) or getattr(t0, "cover_url", None)
+        token = _tm.get_headers()
 
-                                                                            
-    albums = {getattr(t, "album", None) for t in items}
-    resp_type = "album" if len(albums) == 1 and albums != {None} else "playlist"
+        def _raw_to_track(t, idx, parent_cover=None):
+            return {
+                "title": t.get("title", "Unknown"),
+                "artists": [a for a in t.get("artists", []) if a],
+                "album": t.get("album"),
+                "duration": t.get("duration_s", 0),
+                "cover_url": t.get("cover_url") or parent_cover,
+                "spotify_url": t.get("spotify_url"),
+                "isrc": None,
+                "year": str(t.get("year")) if t.get("year") else None,
+                "source": "spotify",
+                "media_type": "audio",
+                "track_number": t.get("track_number"),
+                "total_tracks": t.get("total_tracks", 0),
+                "genre": t.get("genre"),
+            }
 
-    return InspectResponse(
-        type=resp_type,
-        title=parent_title,
-        owner=parent_owner,
-        cover_url=parent_cover,
-        total_tracks=len(items),
-        tracks=[_track_to_info(t) for t in items],
-    )
+        try:
+            if "playlist/" in url:
+                pid = url.split("playlist/")[-1].split("?")[0]
+                first_chunk = True
+                track_index = 0
+                for meta, chunk in get_playlist_generator(pid, _tm):
+                    if first_chunk:
+                        header = {
+                            "type": "header",
+                            "meta": {
+                                "type": "playlist",
+                                "title": meta.get("name"),
+                                "owner": meta.get("owner"),
+                                "cover_url": meta.get("cover_url"),
+                                "total_tracks": meta.get("total") or len(chunk),
+                            }
+                        }
+                        yield f"data: {json.dumps(header)}\n\n"
+                        first_chunk = False
+                    
+                    for t in chunk:
+                        track_item = _raw_to_track(t, track_index, meta.get("cover_url"))
+                        tid = t.get("track_id")
+                        if tid:
+                            fut = executor.submit(get_track_isrc, tid, token, session)
+                            futures[fut] = (track_index, track_item)
+                        
+                        yield f"data: {json.dumps({'type': 'track_item', 'index': track_index, 'track': track_item})}\n\n"
+                        track_index += 1
+
+            elif "album/" in url:
+                aid = url.split("album/")[-1].split("?")[0]
+                # Direct Pathfinder query for album to get high-fidelity metadata
+                payload = {
+                    "variables": {"uri": f"spotify:album:{aid}", "offset": 0, "limit": 300},
+                    "operationName": "queryAlbum", # Standard web player album query
+                    "extensions": {"persistedQuery": {"version": 1, "sha256Hash": "ce390dbf7ca6b61a23aec210619e1094fe9d23d7f101ff773ce1146f84d4dd10"}},
+                }
+                r = _tm.request("POST", "https://api-partner.spotify.com/pathfinder/v1/query", json=payload)
+                album_data = r.json().get("data", {}).get("albumUnion", {})
+                
+                if not album_data:
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'Album not found'})}\n\n"
+                    return
+                    
+                cover_sources = album_data.get("coverArt", {}).get("sources", [])
+                cover_url = max(cover_sources, key=lambda s: s.get("height", 0)).get("url") if cover_sources else None
+                album_name = album_data.get("name", "Unknown")
+                album_owner = album_data.get("artists", {}).get("items", [{}])[0].get("profile", {}).get("name", "Unknown")
+                
+                raw_items = album_data.get("tracksV2", {}).get("items", [])
+                raw_tracks = []
+                for item in raw_items:
+                    t = item.get("track", {})
+                    if not t: continue
+                    raw_tracks.append({
+                        "title": t.get("name", "Unknown"),
+                        "artists": [a.get("profile", {}).get("name") for a in t.get("artists", {}).get("items", []) if a.get("profile", {}).get("name")],
+                        "album": album_name,
+                        "duration_s": t.get("duration", {}).get("totalMilliseconds", 0) // 1000,
+                        "track_number": t.get("trackNumber"),
+                        "cover_url": cover_url,
+                        "spotify_url": f"https://open.spotify.com/track/{t.get('id')}" if t.get("id") else None,
+                        "track_id": t.get("id"),
+                        "year": str((album_data.get("date") or {}).get("year", "")) if (album_data.get("date") or {}).get("year") else None,
+                    })
+
+                header = {
+                    "type": "header",
+                    "meta": {
+                        "type": "album",
+                        "title": album_name,
+                        "owner": album_owner,
+                        "cover_url": cover_url,
+                        "total_tracks": len(raw_tracks),
+                    }
+                }
+                yield f"data: {json.dumps(header)}\n\n"
+                
+                for i, t in enumerate(raw_tracks):
+                    track_item = _raw_to_track(t, i, cover_url)
+                    tid = t.get("track_id")
+                    if tid:
+                        fut = executor.submit(get_track_isrc, tid, token, session)
+                        futures[fut] = (i, track_item)
+                        
+                    yield f"data: {json.dumps({'type': 'track_item', 'index': i, 'track': track_item})}\n\n"
+
+            elif "track/" in url:
+                tid = url.split("track/")[-1].split("?")[0]
+                data = get_track(tid, _tm)
+                if not data or data.get("error"):
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'Track not found'})}\n\n"
+                    return
+                
+                track_item = _raw_to_track(data, 0, data.get("cover_url"))
+                track_id = data.get("track_id") or tid
+                if track_id:
+                    # Synchronous ISRC fetch for single track since frontend closes connection immediately
+                    track_item["isrc"] = get_track_isrc(track_id, token, session)
+                
+                yield f"data: {json.dumps({'type': 'track', 'track': track_item})}\n\n"
+
+            else:
+                from core.parser import InputParser
+                items = InputParser.parse(url)
+                if not items:
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'Unsupported URL'})}\n\n"
+                    return
+                
+                t0 = items[0]
+                t0 = items[0]
+                if len(items) == 1:
+                    track_item = {
+                        "title": getattr(t0, "title", "Unknown"),
+                        "artists": getattr(t0, "artists", []),
+                        "album": getattr(t0, "album", None),
+                        "duration": getattr(t0, "duration", 0),
+                        "cover_url": getattr(t0, "cover_url", None),
+                        "spotify_url": getattr(t0, "spotify_url", None),
+                        "isrc": getattr(t0, "isrc", None),
+                        "year": getattr(t0, "year", None),
+                        "source": getattr(t0, "source", "spotify"),
+                        "media_type": getattr(t0, "media_type", "audio"),
+                        "track_number": getattr(t0, "track_number", None),
+                        "total_tracks": getattr(t0, "total_tracks", 0),
+                        "genre": getattr(t0, "genre", None),
+                    }
+                    yield f"data: {json.dumps({'type': 'track', 'track': track_item})}\n\n"
+                else:
+                    header = {
+                        "type": "header",
+                        "meta": {
+                            "type": "playlist",
+                            "title": getattr(t0, "parent_name", None) or getattr(t0, "album", None) or "Playlist",
+                            "owner": getattr(t0, "parent_owner", None) or "Spotify",
+                            "cover_url": getattr(t0, "parent_cover", None) or getattr(t0, "cover_url", None),
+                            "total_tracks": len(items),
+                        }
+                    }
+                    yield f"data: {json.dumps(header)}\n\n"
+
+                    for i, t in enumerate(items):
+                        track_item = {
+                            "title": getattr(t, "title", "Unknown"),
+                            "artists": getattr(t, "artists", []),
+                            "album": getattr(t, "album", None),
+                            "duration": getattr(t, "duration", 0),
+                            "cover_url": getattr(t, "cover_url", None),
+                            "spotify_url": getattr(t, "spotify_url", None),
+                            "isrc": getattr(t, "isrc", None),
+                            "year": getattr(t, "year", None),
+                            "source": getattr(t, "source", "spotify"),
+                            "media_type": getattr(t, "media_type", "audio"),
+                            "track_number": getattr(t, "track_number", None),
+                            "total_tracks": getattr(t, "total_tracks", 0),
+                            "genre": getattr(t, "genre", None),
+                        }
+                        yield f"data: {json.dumps({'type': 'track_item', 'index': i, 'track': track_item})}\n\n"
+
+            for fut in concurrent.futures.as_completed(futures):
+                try:
+                    isrc = fut.result()
+                    if isrc:
+                        idx, t = futures[fut]
+                        yield f"data: {json.dumps({'type': 'update', 'index': idx, 'updates': {'isrc': isrc}})}\n\n"
+                except Exception as e:
+                    traceback.print_exc()
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except Exception as e:
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            
+        finally:
+            executor.shutdown(wait=False)
+            session.close()
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 @router.post("/track/enrich", response_model=TrackSchema)

@@ -340,6 +340,7 @@ def get_track(track_id: str, tm: TokenManager) -> dict:
             ),
             "album": album["name"],
             "album_id": album["id"],
+            "artist_id": next((a.get("uri", "").split(":")[-1] for a in data.get("firstArtist", {}).get("items", []) if a.get("uri")), None),
             "year": album["date"]["year"],
             "duration_s": data["duration"]["totalMilliseconds"] // 1000,
             "track_number": data["trackNumber"],
@@ -422,13 +423,10 @@ def get_tracks_parallel(track_ids, tm, max_workers=5):
     return results
 
 
-def get_playlist(playlist_id: str, tm: TokenManager, limit: int = PLAYLIST_LIMIT) -> dict:
+def get_playlist_generator(playlist_id: str, tm: TokenManager, limit: int = PLAYLIST_LIMIT):
     """
-    Fetch a full playlist via Pathfinder, paginating automatically.
-    Returns: {name, owner, cover_url, tracks: list[dict]}
-    Each track dict has the same shape as get_track() output plus track_id.
+    Yields (meta_dict, track_chunk) where meta_dict has name, owner, cover_url, total
     """
-    all_tracks = []
     offset = 0
     playlist_name = None
     playlist_owner = None
@@ -472,7 +470,6 @@ def get_playlist(playlist_id: str, tm: TokenManager, limit: int = PLAYLIST_LIMIT
             print(f"[get_playlist] Unexpected schema: {list(data.get('data', {}).keys())}")
             break
 
-        # Playlist-level metadata — only needed from first page
         if offset == 0:
             playlist_name = (
                 pl.get("name")
@@ -510,6 +507,7 @@ def get_playlist(playlist_id: str, tm: TokenManager, limit: int = PLAYLIST_LIMIT
         if not items:
             break
 
+        chunk_tracks = []
         for item in items:
             track_data = (
                 item.get("itemV2", {}).get("data")
@@ -574,15 +572,26 @@ def get_playlist(playlist_id: str, tm: TokenManager, limit: int = PLAYLIST_LIMIT
                 raw_year = date.get("year")
                 year = iso or (str(raw_year) if raw_year else None)
 
-                all_tracks.append({
+                duration_ms = 0
+                for k in ("duration", "trackDuration", "duration_ms", "length"):
+                    val = track_data.get(k)
+                    if isinstance(val, int):
+                        duration_ms = val
+                        break
+                    elif isinstance(val, dict):
+                        ms = val.get("totalMilliseconds")
+                        if isinstance(ms, int):
+                            duration_ms = ms
+                            break
+                        
+                chunk_tracks.append({
                     "title": track_data.get("name", "Unknown"),
                     "artists": artists,
                     "album": album.get("name"),
                     "album_id": album.get("id"),
+                    "artist_id": next((a.get("uri", "").split(":")[-1] for a in track_data.get("firstArtist", {}).get("items", []) if a.get("uri")), None),
                     "year": year,
-                    "duration_s": (
-                        track_data.get("duration", {}).get("totalMilliseconds") or 0
-                    ) // 1000,
+                    "duration_s": duration_ms // 1000,
                     "track_number": track_data.get("trackNumber"),
                     "cover_url": cover_url,
                     "spotify_url": (
@@ -596,16 +605,38 @@ def get_playlist(playlist_id: str, tm: TokenManager, limit: int = PLAYLIST_LIMIT
                 print(f"[get_playlist] Skipped track due to parse error: {e}")
                 continue
 
+        meta = {
+            "name": playlist_name,
+            "owner": playlist_owner,
+            "cover_url": playlist_cover,
+            "total": total,
+        }
+        
+        yield meta, chunk_tracks
+
         offset += len(items)
         if total is not None and offset >= total:
             break
         if len(items) < limit:
             break
 
-    print(f"[get_playlist] Fetched {len(all_tracks)} tracks for '{playlist_name}'")
+def get_playlist(playlist_id: str, tm: TokenManager, limit: int = PLAYLIST_LIMIT) -> dict:
+    """
+    Fetch a full playlist via Pathfinder, paginating automatically.
+    Returns: {name, owner, cover_url, tracks: list[dict]}
+    Each track dict has the same shape as get_track() output plus track_id.
+    """
+    all_tracks = []
+    meta = {}
+    for m, chunk in get_playlist_generator(playlist_id, tm, limit):
+        if not meta:
+            meta = m
+        all_tracks.extend(chunk)
+        
+    print(f"[get_playlist] Fetched {len(all_tracks)} tracks for '{meta.get('name')}'")
     return {
-        "name": playlist_name,
-        "owner": playlist_owner,
-        "cover_url": playlist_cover,
+        "name": meta.get("name"),
+        "owner": meta.get("owner"),
+        "cover_url": meta.get("cover_url"),
         "tracks": all_tracks,
     }

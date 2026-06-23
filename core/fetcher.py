@@ -48,6 +48,18 @@ def fetch_audio(video_id: str, output_dir: str = "downloads", progress_hook=None
         }],
     }
 
+    if audio_codec == "mp3":
+        base_opts["postprocessor_args"] = {
+            "ffmpeg": [
+                "-c:a", "libmp3lame",
+                "-b:a", "320k",
+                "-joint_stereo", "1",
+                "-id3v2_version", "3",
+                "-map_metadata", "0",
+                "-write_id3v1", "1"
+            ]
+        }
+
     if progress_hook:
         base_opts["progress_hooks"] = [progress_hook]
     if postprocessor_hook:
@@ -75,7 +87,7 @@ def fetch_audio(video_id: str, output_dir: str = "downloads", progress_hook=None
                 info = ydl.extract_info(url, download=True)
                 raw_path = ydl.prepare_filename(info)
 
-            print(f"[Spyde] Download succeeded using format: {fmt}")
+            print(f"[Spyde] Download succeeded using format: {fmt} -> {os.path.basename(raw_path)}")
             break
 
         except Exception as e:

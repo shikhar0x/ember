@@ -65,12 +65,13 @@
   let playlistOwner = "";
   let playlistCover: string | null = null;
   let playlistType = "playlist";
-  let playlistTracks: TrackInfo[] = [];
+  let playlistTracks: (TrackInfo | null)[] = [];
   let selectedIndices: Set<number> = new Set();
   let batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
 
   $: showDetails = track !== null || isPlaylist;
-  $: allSelected = selectedIndices.size === playlistTracks.length && playlistTracks.length > 0;
+  $: loadedCount = playlistTracks.filter(t => t !== null).length;
+  $: allSelected = selectedIndices.size === loadedCount && loadedCount > 0;
 
   let isExpanding = false;
 
@@ -96,7 +97,11 @@
 
   function toggleAll() {
     if (allSelected) selectedIndices = new Set();
-    else selectedIndices = new Set(playlistTracks.map((_: TrackInfo, i: number) => i));
+    else {
+      const indices: number[] = [];
+      playlistTracks.forEach((t, i) => { if (t !== null) indices.push(i); });
+      selectedIndices = new Set(indices);
+    }
   }
 
   // ── Warmup ─────────────────────────────────────────────────────────────────
@@ -137,72 +142,81 @@
     isPlaylist = false;
     playlistTracks = [];
     selectedIndices = new Set();
-    batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
     downloadSuccess = null;
     fetchError = "";
     isFetching = true;
     statusText = "Inspecting...";
 
-    try {
-      const res = await fetch(`${API_BASE}/track/info?url=${encodeURIComponent(url.trim())}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || `API error ${res.status}`);
-      }
-      const data = await res.json();
+    const es = new EventSource(`${API_BASE}/inspect?url=${encodeURIComponent(url.trim())}`);
 
-      transitioning = true;
-      await new Promise(r => setTimeout(r, 300));
+    es.onmessage = async (event) => {
+        const msg = JSON.parse(event.data);
 
-      if (data.type === "track" && data.track) {
-        track = data.track;
-        isPlaylist = false;
-      } else {
-        isPlaylist = true;
-        playlistType = data.type;
-        playlistTitle = data.title || "Playlist";
-        playlistOwner = data.owner || "Spotify";
-        playlistCover = data.cover_url;
-        playlistTracks = data.tracks || [];
-        selectedIndices = new Set(playlistTracks.map((_: TrackInfo, i: number) => i));
-        
-        enrichPlaylistTracks();
-      }
-
-      isExpanding = true;
-      await new Promise(r => setTimeout(r, 100));
-      transitioning = false;
-      statusText = "Ready";
-    } catch (err) {
-      fetchError = getErrorMessage(err);
-      statusText = "Ready";
-    } finally {
-      isFetching = false;
-    }
-  }
-  
-  // Progressively fetch cover art and metadata for playlist items in the background
-  async function enrichPlaylistTracks() {
-    const BATCH_SIZE = 5;
-    for (let i = 0; i < playlistTracks.length; i += BATCH_SIZE) {
-      const batch = playlistTracks.slice(i, i + BATCH_SIZE);
-      const results = await Promise.allSettled(
-        batch.map((t, j) => {
-          if (t.isrc || !t.spotify_url?.includes("/track/")) return Promise.resolve(null);
-          return fetch(`${API_BASE}/track/enrich`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(t)
-          }).then(r => r.ok ? r.json() : null).catch(() => null);
-        })
-      );
-      results.forEach((result, j) => {
-        if (result.status === "fulfilled" && result.value) {
-          playlistTracks[i + j] = result.value;
+        if (msg.type === "track") {
+            transitioning = true;
+            await new Promise(r => setTimeout(r, 300));
+            track = msg.track;
+            isPlaylist = false;
+            isExpanding = true;
+            await new Promise(r => setTimeout(r, 100));
+            transitioning = false;
+            statusText = "Ready";
+            isFetching = false;
+            es.close();
         }
-      });
-      playlistTracks = [...playlistTracks];
-    }
+
+        else if (msg.type === "header") {
+            transitioning = true;
+            // Initialize state synchronously so incoming track_items have a valid array to populate
+            playlistType = msg.meta.type;
+            playlistTitle = msg.meta.title;
+            playlistOwner = msg.meta.owner;
+            playlistCover = msg.meta.cover_url;
+            playlistTracks = new Array(msg.meta.total_tracks).fill(null);
+            selectedIndices = new Set();
+            
+            await new Promise(r => setTimeout(r, 300));
+            isPlaylist = true;
+            isExpanding = true;
+            await new Promise(r => setTimeout(r, 100));
+            transitioning = false;
+            statusText = `Loading ${msg.meta.total_tracks} tracks...`;
+            isFetching = true;
+        }
+
+        else if (msg.type === "track_item") {
+            // tracks arrive out-of-order for playlists (as_completed), slot them by index
+            playlistTracks[msg.index] = msg.track;
+            playlistTracks = [...playlistTracks];
+            // auto-select as they arrive
+            selectedIndices.add(msg.index);
+            selectedIndices = new Set(selectedIndices);
+            const loaded = playlistTracks.filter((t: TrackInfo | null) => t !== null).length;
+            statusText = `Loaded ${loaded} / ${playlistTracks.length} tracks`;
+        }
+
+        else if (msg.type === "done") {
+            // fill any nulls (tracks without track_id that were emitted inline)
+            playlistTracks = playlistTracks.filter((t: TrackInfo | null) => t !== null);
+            statusText = "Ready";
+            isFetching = false;
+            es.close();
+        }
+
+        else if (msg.type === "error") {
+            fetchError = msg.message;
+            statusText = "Ready";
+            isFetching = false;
+            es.close();
+        }
+    };
+
+    es.onerror = () => {
+        fetchError = "Connection error";
+        statusText = "Ready";
+        isFetching = false;
+        es.close();
+    };
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -311,7 +325,7 @@
 
     try {
       const [codec, quality] = AUDIO_FMT_MAP[selectedFormat] ?? ["mp3", "0"];
-      const selectedTracks = [...selectedIndices].sort((a, b) => a - b).map(i => playlistTracks[i]);
+      const selectedTracks = [...selectedIndices].sort((a, b) => a - b).map(i => playlistTracks[i]).filter(t => t !== null);
 
       const body = {
         tracks: selectedTracks,
@@ -686,6 +700,7 @@
 
           <div class="track-list">
             {#each playlistTracks as t, i}
+              {#if t}
               <button
                 class="track-row"
                 class:selected={selectedIndices.has(i)}
@@ -704,6 +719,15 @@
                 </div>
                 <span class="track-dur">{t.duration != null && t.duration > 0 ? formatDuration(t.duration) : ''}</span>
               </button>
+              {:else}
+              <div class="track-row loading-row">
+                <span class="track-num">{i + 1}</span>
+                <span class="track-thumb-placeholder">⟳</span>
+                <div class="track-info">
+                  <span class="track-row-title muted">Loading...</span>
+                </div>
+              </div>
+              {/if}
             {/each}
           </div>
 
