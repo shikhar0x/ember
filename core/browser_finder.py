@@ -159,11 +159,31 @@ _CANDIDATE_FACTORIES = [
 
 def _get_major_version(binary: str) -> int:
     """Return the major version of a Chromium-family browser, or 0 on failure."""
-    # Strategy 1: --version flag (works on Linux/macOS, sometimes Windows)
+    if sys.platform == "win32":
+        try:
+            import win32api
+            info = win32api.GetFileVersionInfo(binary, "\\")
+            ms = info['FileVersionMS']
+            return int(ms / 65536)
+        except Exception:
+            try:
+                # Fallback to wmic which is much safer than powershell
+                result = subprocess.run(
+                    ["wmic", "datafile", "where", f'name="{binary.replace("\\", "\\\\")}"', "get", "Version", "/value"],
+                    capture_output=True, text=True, timeout=5
+                )
+                match = re.search(r"Version=(\d+)\.", result.stdout)
+                if match:
+                    return int(match.group(1))
+            except Exception:
+                pass
+        return 0
+
+    # Strategy 1: --version flag (Linux/macOS)
     try:
         result = subprocess.run(
             [binary, "--version"],
-            capture_output=True, text=True, timeout=8
+            capture_output=True, text=True, timeout=5
         )
         text = result.stdout.strip() or result.stderr.strip()
         match = re.search(r"(\d+)\.\d+", text)
@@ -171,22 +191,6 @@ def _get_major_version(binary: str) -> int:
             return int(match.group(1))
     except Exception:
         pass
-
-    # Strategy 2: Windows file version (PowerShell) — handles "Opening in
-    # existing browser session" case when the browser is already running
-    if sys.platform == "win32":
-        try:
-            result = subprocess.run(
-                ["powershell.exe", "-Command",
-                 f'(Get-Item \'{binary}\').VersionInfo.FileVersion'],
-                capture_output=True, text=True, timeout=8
-            )
-            text = result.stdout.strip()
-            match = re.search(r"(\d+)\.\d+", text)
-            if match:
-                return int(match.group(1))
-        except Exception:
-            pass
 
     return 0
 
@@ -268,6 +272,11 @@ def find_chromedriver(browser: Optional[BrowserInfo] = None) -> str:
 def _try_webdriver_manager(major_version: int, browser: Optional[BrowserInfo]) -> Optional[str]:
     """Try to get a chromedriver via webdriver-manager. Returns path or None."""
     try:
+        import os
+        os.environ["WDM_LOG"] = "0"
+        import logging
+        logging.getLogger("WDM").setLevel(logging.CRITICAL)
+        
         from webdriver_manager.chrome import ChromeDriverManager
         from webdriver_manager.core.os_manager import ChromeType
     except ImportError:
