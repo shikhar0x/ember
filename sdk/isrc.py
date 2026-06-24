@@ -120,9 +120,7 @@ def get_track_isrc(
         )
 
     except Exception as e:
-        print(
-            f"[ISRC] Error for {track_id}: {e}"
-        )
+        pass
         return None
 
 def get_track_isrc_batch(
