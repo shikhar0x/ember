@@ -127,31 +127,59 @@ class TokenManager:
 
         options = Options()
         options.binary_location = browser_info.binary
-        options.add_argument("--headless")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-extensions")
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+
+        import os
+        if sys.platform == "win32":
+            # Windows: headless + profile crashes Chromium. We use visible profile to bypass WAF.
+            user_data_dir = os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data")
+            if os.path.exists(user_data_dir):
+                options.add_argument(f"--user-data-dir={user_data_dir}")
+                options.add_argument("--profile-directory=Default")
+        else:
+            # Linux/Mac: headless mode works and is preferred for clean sidecar execution.
+            options.add_argument("--headless")
+            options.add_argument("--disable-extensions")
 
         import subprocess
         service_kwargs = {}
         if sys.platform == "win32":
             service_kwargs["creation_flags"] = subprocess.CREATE_NO_WINDOW
 
-        driver = webdriver.Chrome(
-            service=Service(driver_path, **service_kwargs),
-            options=options,
-        )
-
-        bearer = None
+        try:
+            driver = webdriver.Chrome(
+                service=Service(driver_path, **service_kwargs),
+                options=options,
+            )
+        except Exception as e:
+            if "already in use" in str(e).lower() or "invalid argument" in str(e).lower():
+                raise RuntimeError(
+                    "\n\n[TokenManager] ❌ Cannot fetch token because Brave is currently open! ❌\n"
+                    "Please completely close Brave (and ensure no background Brave processes are running in Task Manager) "
+                    "and try restarting the backend. We need to borrow your profile to bypass the Spotify firewall.\n\n"
+                ) from e
+            raise
 
         try:
-            driver.get("https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b")
+            if sys.platform == "win32":
+                driver.minimize_window()
+        except Exception:
+            pass
 
-            deadline = time.time() + 15
-            while time.time() < deadline:
+        bearer = None
+        try:
+            driver.set_page_load_timeout(10)
+            try:
+                driver.get("https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b")
+            except Exception:
+                pass # Spotify often keeps the connection open, timing out the page load. This is fine.
+
+            start = time.time()
+            while time.time() - start < 15:
                 time.sleep(1)
                 for log in driver.get_log("performance"):
                     msg = json.loads(log["message"])["message"]
@@ -166,7 +194,29 @@ class TokenManager:
                 if bearer:
                     break
         finally:
-            driver.quit()
+            if sys.platform == "win32":
+                try:
+                    driver.close()
+                except Exception:
+                    pass
+                try:
+                    # Force kill the chromedriver process without sending /shutdown to the browser
+                    if driver.service.process:
+                        import psutil
+                        parent = psutil.Process(driver.service.process.pid)
+                        for child in parent.children(recursive=True):
+                            try:
+                                child.kill()
+                            except:
+                                pass
+                        parent.kill()
+                except Exception:
+                    pass
+            else:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
 
         if not bearer:
             raise RuntimeError(
@@ -278,6 +328,7 @@ class TokenManager:
                             self._expires_at = 0
                         else:
                             print("[TokenManager] Token already refreshed by another thread.")
+                            pass
                     kwargs["headers"] = self.get_headers()
                     continue
 
@@ -389,7 +440,7 @@ def get_isrc(track_id: str, tm: TokenManager) -> str | None:
             if len(isrc) == 12 and isrc[:2].isalpha():
                 return isrc
     except Exception as e:
-        print(f"[ISRC Error] {track_id}: {e}")
+        pass # Spotify often drops ISRC connections when rate-limiting. We gracefully fall back to title matching.
     return None
 
 
