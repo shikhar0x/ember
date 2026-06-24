@@ -414,7 +414,7 @@ def get_album(url: str) -> List[Track]:
     try:
         return _fetch_album_via_embed(album_id)
     except Exception as e:
-        print(f"[Spyde] Album embed failed: {e}")
+        pass # Spotify often drops connections when rate-limiting. We gracefully fall back to title matching.
         raise
 
 
