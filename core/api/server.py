@@ -145,6 +145,10 @@ def start_background(
 
     app = create_app(controller=controller)
     
+    import logging
+    logging.getLogger("uvicorn.access").disabled = True
+    logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)
+    
     config = uvicorn.Config(
         app, host=host, port=port,
         log_level="critical",
@@ -178,12 +182,13 @@ def get_registry() -> Optional[TaskRegistry]:
     return _registry
 
 if __name__ == "__main__":
-    import sys, os
+    import sys, os, logging
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w")
-
+    logging.getLogger("uvicorn.access").disabled = True
+    logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)
     app = create_app()
     uvicorn.run(
         app,
@@ -191,5 +196,5 @@ if __name__ == "__main__":
         port=DEFAULT_PORT,
         log_level="critical",
         access_log=False,
-        use_colors=False
+        use_colors=False,
     )
