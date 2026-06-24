@@ -150,21 +150,20 @@ fn start_backend(app: &tauri::AppHandle) {
 
         #[cfg(target_os = "windows")]
         {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
             Command::new(python_path)
                 .env("PYTHONPATH", &root_dir)
+                .env("PYTHONUNBUFFERED", "1")
                 .arg("-W").arg("ignore")
                 .arg(server_path)
                 .stdout(std::process::Stdio::inherit())
                 .stderr(std::process::Stdio::inherit())
-                .creation_flags(CREATE_NO_WINDOW)
                 .spawn()
                 .expect("Failed to start python backend in dev mode")
         }
         #[cfg(not(target_os = "windows"))]
         Command::new(python_path)
             .env("PYTHONPATH", &root_dir)
+            .env("PYTHONUNBUFFERED", "1")
             .arg("-W").arg("ignore")
             .arg(server_path)
             .stdout(std::process::Stdio::inherit())
