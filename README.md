@@ -144,12 +144,12 @@ npm run tauri dev
 ## Important Usage Notes
 
 - **Initial Loading Time**: When you open Ember (especially for the first time), the initial startup sequence may take up to 30 seconds depending on your network speed, as the backend initializes its internal dependencies and browser hooks.
-- **Background Popups**: On Windows, when Ember is opened, you might see a **spooky** Command Prompt flash. Additionally, if you use the Brave browser, a new browser window might pop open. You can close this Brave window manually if you'd like (or just ignore it). **Don't panic! Ember is not a virus! 😇**. It's just our automated extraction engine doing a quick ninja-run to snatch the required metadata and security cookies in the background.
+- **Background Popups**: On Windows, when Ember is opened, you might see a **spooky** Command Prompt flash. Additionally, if you use Chrome, Edge, or Brave, a new browser window might pop open. You can close this window manually if you'd like (or just ignore it). **Don't panic! Ember is not a virus! 😇**. It's just our automated extraction engine doing a quick ninja-run to snatch the required metadata and security cookies in the background.
 
 ## Troubleshooting
 
 - **Backend fails to start**: Ensure the virtual environment (`.venv`) exists and all dependencies from `requirements.txt` are installed. Tauri looks specifically for the `.venv` directory to launch the API in dev mode.
-- **Browser/Metadata extraction errors**: Ensure you have Chrome or Brave installed, as the extraction engine relies on them for cookie harvesting and Playwright automation.
+- **Browser/Metadata extraction errors**: Ensure you have Chrome, Edge, or Brave installed, as the extraction engine relies on them for cookie harvesting and Selenium automation.
 - **Zombie processes**: The Tauri shell automatically kills orphaned backend instances on port 8008 on startup. If you experience hangs, you can manually kill processes listening on port 8008.
 
 ## License
