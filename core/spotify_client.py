@@ -134,15 +134,24 @@ class TokenManager:
         options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
         import os
+        bname = browser_info.name.lower()
+        user_data_dir = None
+
         if sys.platform == "win32":
             # Windows: headless + profile crashes Chromium. We use visible profile to bypass WAF.
-            user_data_dir = os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data")
-            if os.path.exists(user_data_dir):
+            if "brave" in bname:
+                user_data_dir = os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data")
+            elif "chrome" in bname:
+                user_data_dir = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data")
+            elif "edge" in bname:
+                user_data_dir = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data")
+            
+            if user_data_dir and os.path.exists(user_data_dir):
                 options.add_argument(f"--user-data-dir={user_data_dir}")
                 options.add_argument("--profile-directory=Default")
         else:
             # Linux/Mac: headless mode works and is preferred for clean sidecar execution.
-            options.add_argument("--headless")
+            options.add_argument("--headless=new")
             options.add_argument("--disable-extensions")
 
         import subprocess
@@ -156,10 +165,11 @@ class TokenManager:
                 options=options,
             )
         except Exception as e:
-            if "already in use" in str(e).lower() or "invalid argument" in str(e).lower():
+            err_str = str(e).lower()
+            if "already in use" in err_str or "invalid argument" in err_str or "chrome instance exited" in err_str:
                 raise RuntimeError(
-                    "\n\n[TokenManager] ❌ Cannot fetch token because Brave is currently open! ❌\n"
-                    "Please completely close Brave (and ensure no background Brave processes are running in Task Manager) "
+                    "\n\n[TokenManager] ❌ Cannot fetch token because the browser is currently running in the background! ❌\n"
+                    "Please completely close your browser (and ensure no background processes are running in your system monitor) "
                     "and try restarting the backend. We need to borrow your profile to bypass the Spotify firewall.\n\n"
                 ) from e
             raise
@@ -173,6 +183,32 @@ class TokenManager:
         bearer = None
         try:
             driver.set_page_load_timeout(10)
+            
+            if sys.platform != "win32":
+                try:
+                    import browser_cookie3
+                    cj = None
+                    b_name = browser_info.name.lower()
+                    if "brave" in b_name:
+                        cj = browser_cookie3.brave(domain_name="spotify.com")
+                    elif "chrome" in b_name:
+                        cj = browser_cookie3.chrome(domain_name="spotify.com")
+                    elif "edge" in b_name:
+                        cj = browser_cookie3.edge(domain_name="spotify.com")
+                    elif "firefox" in b_name:
+                        cj = browser_cookie3.firefox(domain_name="spotify.com")
+                    
+                    if cj:
+                        try:
+                            driver.get("https://open.spotify.com/404")
+                            time.sleep(1)
+                            for c in cj:
+                                driver.add_cookie({'name': c.name, 'value': c.value, 'domain': c.domain, 'path': c.path})
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
             try:
                 driver.get("https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b")
             except Exception:
@@ -194,29 +230,10 @@ class TokenManager:
                 if bearer:
                     break
         finally:
-            if sys.platform == "win32":
-                try:
-                    driver.close()
-                except Exception:
-                    pass
-                try:
-                    # Force kill the chromedriver process without sending /shutdown to the browser
-                    if driver.service.process:
-                        import psutil
-                        parent = psutil.Process(driver.service.process.pid)
-                        for child in parent.children(recursive=True):
-                            try:
-                                child.kill()
-                            except:
-                                pass
-                        parent.kill()
-                except Exception:
-                    pass
-            else:
-                try:
-                    driver.quit()
-                except Exception:
-                    pass
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
         if not bearer:
             raise RuntimeError(
@@ -676,6 +693,9 @@ def get_playlist(playlist_id: str, tm: TokenManager, limit: int = PLAYLIST_LIMIT
     Fetch a full playlist via Pathfinder, paginating automatically.
     Returns: {name, owner, cover_url, tracks: list[dict]}
     Each track dict has the same shape as get_track() output plus track_id.
+    
+    TODO: This collects everything eagerly in memory. The generator buys 
+    nothing for memory until the caller is updated to stream tracks directly.
     """
     all_tracks = []
     meta = {}
