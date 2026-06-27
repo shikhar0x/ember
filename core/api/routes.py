@@ -412,12 +412,17 @@ def inspect_url(url: str):
                 t0 = items[0]
                 t0 = items[0]
                 if len(items) == 1:
+                    uploader = getattr(t0, "uploader", None)
+                    artists = getattr(t0, "artists", [])
+                    if not artists and uploader:
+                        artists = [uploader]
+
                     track_item = {
                         "title": getattr(t0, "title", "Unknown"),
-                        "artists": getattr(t0, "artists", []),
+                        "artists": artists,
                         "album": getattr(t0, "album", None),
                         "duration": getattr(t0, "duration", 0),
-                        "cover_url": getattr(t0, "cover_url", None),
+                        "cover_url": getattr(t0, "cover_url", getattr(t0, "thumbnail_url", None)),
                         "spotify_url": getattr(t0, "spotify_url", None),
                         "isrc": getattr(t0, "isrc", None),
                         "year": getattr(t0, "year", None),
@@ -442,12 +447,17 @@ def inspect_url(url: str):
                     yield f"data: {json.dumps(header)}\n\n"
 
                     for i, t in enumerate(items):
+                        uploader = getattr(t, "uploader", None)
+                        artists = getattr(t, "artists", [])
+                        if not artists and uploader:
+                            artists = [uploader]
+
                         track_item = {
                             "title": getattr(t, "title", "Unknown"),
-                            "artists": getattr(t, "artists", []),
+                            "artists": artists,
                             "album": getattr(t, "album", None),
                             "duration": getattr(t, "duration", 0),
-                            "cover_url": getattr(t, "cover_url", None),
+                            "cover_url": getattr(t, "cover_url", getattr(t, "thumbnail_url", None)),
                             "spotify_url": getattr(t, "spotify_url", None),
                             "isrc": getattr(t, "isrc", None),
                             "year": getattr(t, "year", None),
