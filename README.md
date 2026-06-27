@@ -77,6 +77,8 @@ Supported browsers include:
 - Microsoft Edge
 
 You must be logged into Spotify in one of these browsers before launching Ember.
+> [!WARNING]
+> **On Windows:** Ember will directly use your active browser profile to fetch authentication tokens. You must completely close your browser (including background processes) before running Ember, otherwise it will crash because the profile database is locked.
 
 ## Virtual Environment Setup
 
@@ -150,6 +152,7 @@ npm run tauri dev
 
 - **Backend fails to start**: Ensure the virtual environment (`.venv`) exists and all dependencies from `requirements.txt` are installed. Tauri looks specifically for the `.venv` directory to launch the API in dev mode.
 - **Browser/Metadata extraction errors**: Ensure you have Chrome, Edge, or Brave installed, as the extraction engine relies on them for cookie harvesting and Selenium automation.
+- **"Cannot fetch token because the browser is currently running"**: On Windows, Ember needs exclusive access to your browser profile to extract your session. Ensure all browser windows are closed, and check your Task Manager to kill any hidden background instances of Chrome/Brave/Edge.
 - **Zombie processes**: The Tauri shell automatically kills orphaned backend instances on port 8008 on startup. If you experience hangs, you can manually kill processes listening on port 8008.
 
 ## License
