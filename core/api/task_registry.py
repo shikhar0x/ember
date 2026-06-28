@@ -25,19 +25,22 @@ class TaskRegistry:
     def create(self, future: concurrent.futures.Future) -> str:
         """Register a new task and return its UUID."""
         task_id = uuid.uuid4().hex[:12]
+        pause_event = threading.Event()
+        pause_event.set()  # starts unpaused
         with self._lock:
             self._tasks[task_id] = {
                 "future": future,
                 "state": "running",
                 "latest": None,
                 "events": [],
+                "pause_event": pause_event,
             }
 
                                                        
         def _on_done(f):
             with self._lock:
                 entry = self._tasks.get(task_id)
-                if entry and entry["state"] == "running":
+                if entry and entry["state"] in ("running", "paused"):
                     if f.cancelled():
                         entry["state"] = "cancelled"
                     elif f.exception():
@@ -50,6 +53,15 @@ class TaskRegistry:
     def make_callback(self, task_id: str) -> Callable[[dict], None]:
         """Return a callback that appends payloads to this task's event stream."""
         def _cb(payload: dict):
+            # Block here while task is paused (progress hooks fire frequently)
+            with self._lock:
+                entry = self._tasks.get(task_id)
+                if entry is None:
+                    return
+                pause_ev = entry.get("pause_event")
+            if pause_ev:
+                pause_ev.wait()  # blocks until resumed
+
             with self._lock:
                 entry = self._tasks.get(task_id)
                 if entry is None:
@@ -107,6 +119,38 @@ class TaskRegistry:
                 entry["state"] = "cancelled"
                 return True, "Cancelled"
             return False, "Task already executing — cannot cancel"
+
+    def pause(self, task_id: str) -> tuple[bool, str]:
+        """Pause a running task."""
+        with self._lock:
+            entry = self._tasks.get(task_id)
+            if entry is None:
+                return False, "Task not found"
+            if entry["state"] != "running":
+                return False, f"Task is {entry['state']}"
+            entry["pause_event"].clear()
+            entry["state"] = "paused"
+            return True, "Paused"
+
+    def resume(self, task_id: str) -> tuple[bool, str]:
+        """Resume a paused task."""
+        with self._lock:
+            entry = self._tasks.get(task_id)
+            if entry is None:
+                return False, "Task not found"
+            if entry["state"] != "paused":
+                return False, f"Task is {entry['state']}"
+            entry["pause_event"].set()
+            entry["state"] = "running"
+            return True, "Resumed"
+
+    def get_pause_event(self, task_id: str) -> Optional[threading.Event]:
+        """Return the pause event for a task so download workers can check it."""
+        with self._lock:
+            entry = self._tasks.get(task_id)
+            if entry:
+                return entry["pause_event"]
+            return None
 
     def cleanup(self, max_age: int = 500) -> None:
         """Remove completed tasks (called periodically). max_age = max events to keep."""

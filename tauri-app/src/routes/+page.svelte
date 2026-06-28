@@ -69,6 +69,25 @@
   let selectedIndices: Set<number> = new Set();
   let batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
 
+  // ── Navigation history ──────────────────────────────────────────────────
+  type HistorySnapshot = {
+    url: string;
+    track: TrackInfo | null;
+    isPlaylist: boolean;
+    playlistTitle: string;
+    playlistOwner: string;
+    playlistCover: string | null;
+    playlistType: string;
+    playlistTracks: (TrackInfo | null)[];
+    selectedIndices: number[];
+  };
+
+  let history: HistorySnapshot[] = [];
+  let historyIndex = -1;
+
+  $: canGoBack = historyIndex > 0 && !isDownloading;
+  $: canGoForward = historyIndex < history.length - 1 && !isDownloading;
+
   $: showDetails = track !== null || isPlaylist;
   $: loadedCount = playlistTracks.filter(t => t !== null).length;
   $: allSelected = selectedIndices.size === loadedCount && loadedCount > 0;
@@ -163,6 +182,7 @@
             statusText = "Ready";
             isFetching = false;
             es.close();
+            pushSnapshot();
         }
 
         else if (msg.type === "header") {
@@ -201,6 +221,7 @@
             statusText = "Ready";
             isFetching = false;
             es.close();
+            pushSnapshot();
         }
 
         else if (msg.type === "error") {
@@ -240,6 +261,68 @@
     url = "";
   }
 
+  // ── History helpers ──────────────────────────────────────────────────────
+  function pushSnapshot() {
+    // Truncate any forward history
+    history = history.slice(0, historyIndex + 1);
+    history.push({
+      url,
+      track,
+      isPlaylist,
+      playlistTitle,
+      playlistOwner,
+      playlistCover,
+      playlistType,
+      playlistTracks: [...playlistTracks],
+      selectedIndices: [...selectedIndices],
+    });
+    history = history; // trigger reactivity
+    historyIndex = history.length - 1;
+  }
+
+  function restoreSnapshot(snap: HistorySnapshot) {
+    // Stop any active polling
+    stopPolling();
+    // Reset download state
+    isFetching = false;
+    isDownloading = false;
+    downloadSuccess = null;
+    progress = 0;
+    taskId = null;
+    statusText = "Ready";
+    batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
+    fetchError = "";
+    // Restore snapshot state
+    url = snap.url;
+    track = snap.track;
+    isPlaylist = snap.isPlaylist;
+    playlistTitle = snap.playlistTitle;
+    playlistOwner = snap.playlistOwner;
+    playlistCover = snap.playlistCover;
+    playlistType = snap.playlistType;
+    playlistTracks = [...snap.playlistTracks];
+    selectedIndices = new Set(snap.selectedIndices);
+    isExpanding = snap.track !== null || snap.isPlaylist;
+  }
+
+  async function goBack() {
+    if (!canGoBack) return;
+    transitioning = true;
+    await new Promise(r => setTimeout(r, 280));
+    historyIndex--;
+    restoreSnapshot(history[historyIndex]);
+    transitioning = false;
+  }
+
+  async function goForward() {
+    if (!canGoForward) return;
+    transitioning = true;
+    await new Promise(r => setTimeout(r, 280));
+    historyIndex++;
+    restoreSnapshot(history[historyIndex]);
+    transitioning = false;
+  }
+
   // ── Save cover art ─────────────────────────────────────────────────────────
   let isSavingCover = false;
   let coverSaved = false;
@@ -269,6 +352,7 @@
   async function startDownload() {
     if (!track || isDownloading) return;
     isDownloading = true;
+    isPaused = false;
     downloadSuccess = null;
     statusText = "Starting download...";
     progress = 0;
@@ -319,6 +403,7 @@
   async function startBatchDownload() {
     if (isDownloading || selectedIndices.size === 0) return;
     isDownloading = true;
+    isPaused = false;
     statusText = "Starting batch download...";
     progress = 0;
     batchProgress = { completed: 0, total: selectedIndices.size, succeeded: 0, failed: 0 };
@@ -388,6 +473,31 @@
     if (pollInterval !== null) { clearTimeout(pollInterval); pollInterval = null; }
   }
 
+  async function cancelDownload() {
+    if (!taskId) return;
+    try {
+      await fetch(`${API_BASE}/task/${taskId}/cancel`, { method: 'POST' });
+    } catch { /* best-effort */ }
+    stopPolling();
+    isDownloading = false;
+    isPaused = false;
+    statusText = 'Cancelled';
+    downloadSuccess = false;
+    progress = 0;
+    taskId = null;
+  }
+
+  let isPaused = false;
+
+  async function togglePause() {
+    if (!taskId) return;
+    const endpoint = isPaused ? 'resume' : 'pause';
+    try {
+      await fetch(`${API_BASE}/task/${taskId}/${endpoint}`, { method: 'POST' });
+      isPaused = !isPaused;
+    } catch { /* best-effort */ }
+  }
+
   function handleEvent(payload: { type: string; message?: string; progress?: number; completed?: number; total?: number; succeeded?: number; failed?: number; success?: boolean }) {
     const t = payload.type;
     const msg = payload.message || "";
@@ -445,6 +555,24 @@
   </div>
 
   <div class="content-wrapper" class:wide={isExpanding}>
+
+    <!-- ── NAV ARROWS ──────────────────────────────────────────────── -->
+    {#if history.length > 0}
+      <div class="nav-arrows">
+        <button
+          class="nav-btn"
+          onclick={goBack}
+          disabled={!canGoBack}
+          aria-label="Go back"
+        >‹</button>
+        <button
+          class="nav-btn"
+          onclick={goForward}
+          disabled={!canGoForward}
+          aria-label="Go forward"
+        >›</button>
+      </div>
+    {/if}
 
     <!-- ── HEADER ────────────────────────────────────────────────────────── -->
     <header class:compact={isExpanding}>
@@ -523,7 +651,7 @@
 
         <div class="meta-col">
 
-          <button class="back-btn" onclick={clearTrack}>← Back</button>
+
 
           <div class="meta-header">
             <h2 class="track-title">{track.title}</h2>
@@ -589,13 +717,25 @@
           <div class="meta-bottom">
             <div class="divider"></div>
 
-            <div class="progress-track">
-              <div
-                class="progress-fill"
-                style="width: {isDownloading && progress === 0 ? 5 : Math.max(0, progress * 100)}%;"
-                class:active={isDownloading && progress < 1.0}
-                class:complete={progress >= 1.0}
-              ></div>
+            <div class="progress-row">
+              <div class="progress-track">
+                <div
+                  class="progress-fill"
+                  style="width: {isDownloading && progress === 0 ? 5 : Math.max(0, progress * 100)}%;"
+                  class:active={isDownloading && progress < 1.0}
+                  class:complete={progress >= 1.0}
+                ></div>
+              </div>
+              {#if isDownloading}
+                <button class="pause-btn" onclick={togglePause} aria-label="Pause/Resume download">
+                  {#if isPaused}
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  {:else}
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                  {/if}
+                </button>
+                <button class="cancel-btn" onclick={cancelDownload} aria-label="Cancel download">✕</button>
+              {/if}
             </div>
 
             <div class="dl-row">
@@ -681,7 +821,7 @@
         </div>
 
         <div class="meta-col">
-          <button class="back-btn" onclick={clearTrack}>← Back</button>
+
 
           <div class="meta-header">
             <h2 class="track-title">{playlistTitle}</h2>
@@ -734,13 +874,25 @@
           <div class="meta-bottom">
             <div class="divider"></div>
 
-            <div class="progress-track">
-              <div
-                class="progress-fill"
-                style="width: {isDownloading && progress === 0 ? 5 : Math.max(0, progress * 100)}%;"
-                class:active={isDownloading && progress < 1.0}
-                class:complete={progress >= 1.0}
-              ></div>
+            <div class="progress-row">
+              <div class="progress-track">
+                <div
+                  class="progress-fill"
+                  style="width: {isDownloading && progress === 0 ? 5 : Math.max(0, progress * 100)}%;"
+                  class:active={isDownloading && progress < 1.0}
+                  class:complete={progress >= 1.0}
+                ></div>
+              </div>
+              {#if isDownloading}
+                <button class="pause-btn" onclick={togglePause} aria-label="Pause/Resume download">
+                  {#if isPaused}
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  {:else}
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                  {/if}
+                </button>
+                <button class="cancel-btn" onclick={cancelDownload} aria-label="Cancel download">✕</button>
+              {/if}
             </div>
 
             <div class="dl-row">
@@ -1130,22 +1282,49 @@
     padding-bottom: 6px;
   }
 
-  .back-btn {
-    background: rgba(255,255,255,0.02);
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(255,255,255,0.05);
-    color: rgba(255,255,255,0.6); font-size: .85rem;
-    padding: .35rem .9rem; border-radius: 8px;
-    box-shadow: none;
-    align-self: flex-start;
-    margin-left: 6px;
-    margin-bottom: .25rem;
-    flex-shrink: 0;
+  /* ── Nav arrows ─────────────────────────────────────────────────────────── */
+  .nav-arrows {
+    position: absolute;
+    top: 1.5rem;
+    left: 1.5rem;
+    display: flex;
+    gap: 0.35rem;
+    z-index: 10;
   }
-  .back-btn:hover:not(:disabled) {
-    background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.95);
-    border-color: rgba(255,255,255,0.1);
-    transform: scale(1.02); box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  .nav-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.04);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.75);
+    font-size: 1.15rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+    line-height: 1;
+  }
+  .nav-btn:hover:not(:disabled) {
+    background: rgba(225,29,46,0.12);
+    border-color: rgba(225,29,46,0.3);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(225,29,46,0.25);
+    transform: scale(1.08);
+  }
+  .nav-btn:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+  .nav-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  .content-wrapper.wide .nav-arrows {
+    top: 0.75rem;
+    left: 0.75rem;
   }
 
   .track-title {
@@ -1177,6 +1356,52 @@
   .meta-val { color: #D3D7DA; align-self: center; }
   .meta-val.mono { font-family: 'Courier New', monospace; font-size: .82rem; letter-spacing: .04em; color: #A0A4A8; }
   .meta-val.muted { color: #3A3D46; }
+  /* ── Progress row (bar + cancel button) ────────────────────────────────── */
+  .progress-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .progress-row .progress-track { flex: 1; }
+
+  .cancel-btn, .pause-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.04);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.55);
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .cancel-btn:hover {
+    background: rgba(225,29,46,0.15);
+    border-color: rgba(225,29,46,0.35);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(225,29,46,0.25);
+    transform: scale(1.1);
+  }
+  .pause-btn:hover {
+    background: rgba(255,255,255,0.15);
+    border-color: rgba(255,255,255,0.35);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(255,255,255,0.25);
+    transform: scale(1.1);
+  }
+  .cancel-btn:active, .pause-btn:active {
+    transform: scale(0.92);
+  }
+  .pause-btn svg {
+    width: 16px;
+    height: 16px;
+  }
 
   .progress-track {
     width: 100%; height: 21px;

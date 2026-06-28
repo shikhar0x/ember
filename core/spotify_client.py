@@ -131,6 +131,7 @@ class TokenManager:
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-blink-features=AutomationControlled")
+        options.page_load_strategy = 'eager'
         options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
         import os
@@ -150,8 +151,7 @@ class TokenManager:
                 options.add_argument(f"--user-data-dir={user_data_dir}")
                 options.add_argument("--profile-directory=Default")
         else:
-            # Linux/Mac: headless mode works and is preferred for clean sidecar execution.
-            options.add_argument("--headless=new")
+            # Linux/Mac: use visible profile/window to bypass WAF.
             options.add_argument("--disable-extensions")
 
         import subprocess
@@ -175,8 +175,7 @@ class TokenManager:
             raise
 
         try:
-            if sys.platform == "win32":
-                driver.minimize_window()
+            driver.minimize_window()
         except Exception:
             pass
 
@@ -200,14 +199,40 @@ class TokenManager:
                     
                     if cj:
                         try:
-                            driver.get("https://open.spotify.com/404")
-                            time.sleep(1)
+                            # Go to base domain so Selenium accepts the cookies
+                            try:
+                                driver.get("https://spotify.com")
+                            except Exception:
+                                pass # Ignore timeouts, we just need the domain context
+                            
+                            driver.delete_all_cookies()
+                            
                             for c in cj:
-                                driver.add_cookie({'name': c.name, 'value': c.value, 'domain': c.domain, 'path': c.path})
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                                domain = c.domain
+                                if domain.startswith('.'):
+                                    domain = domain[1:]
+                                    
+                                cookie_dict = {
+                                    'name': c.name, 
+                                    'value': c.value, 
+                                    'domain': domain, 
+                                    'path': c.path
+                                }
+                                if c.expires:
+                                    cookie_dict['expiry'] = c.expires
+                                    
+                                try:
+                                    driver.add_cookie(cookie_dict)
+                                except Exception:
+                                    pass # Skip cookies that Selenium rejects
+                            
+                            print(f"[TokenManager] Cookies injected successfully.")
+                        except Exception as ce:
+                            print(f"[TokenManager] Cookie injection error: {ce}")
+                    else:
+                        print(f"[TokenManager] No cookies found by browser_cookie3!")
+                except Exception as b3_err:
+                    print(f"[TokenManager] browser_cookie3 fatal error: {b3_err}")
 
             try:
                 driver.get("https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b")
@@ -215,11 +240,14 @@ class TokenManager:
                 pass # Spotify often keeps the connection open, timing out the page load. This is fine.
 
             start = time.time()
-            while time.time() - start < 15:
+            while time.time() - start < 15 and not bearer:
                 time.sleep(1)
                 for log in driver.get_log("performance"):
                     msg = json.loads(log["message"])["message"]
-                    if msg.get("method") == "Network.requestWillBeSentExtraInfo":
+                    method = msg.get("method", "")
+                    
+                    # Strategy 1: HTTP Authorization header
+                    if method == "Network.requestWillBeSentExtraInfo":
                         headers = msg.get("params", {}).get("headers", {})
                         auth = (
                             headers.get("authorization")
@@ -227,6 +255,15 @@ class TokenManager:
                         )
                         if auth and "Bearer" in auth:
                             bearer = auth
+                    
+                    # Strategy 2: access_token in WebSocket URL (e.g. gae2-dealer.g2.spotify.com)
+                    if not bearer and method == "Network.webSocketCreated":
+                        ws_url = msg.get("params", {}).get("url", "")
+                        if "access_token=" in ws_url:
+                            token = ws_url.split("access_token=")[1].split("&")[0]
+                            if token:
+                                bearer = f"Bearer {token}"
+                                
                 if bearer:
                     break
         finally:

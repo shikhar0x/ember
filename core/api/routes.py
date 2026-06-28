@@ -222,6 +222,20 @@ def cancel_task(task_id: str):
     return CancelResponse(task_id=task_id, cancelled=ok, message=msg)
 
 
+@router.post("/task/{task_id}/pause")
+def pause_task(task_id: str):
+    """Pause a running task."""
+    ok, msg = _registry.pause(task_id)
+    return {"task_id": task_id, "paused": ok, "message": msg}
+
+
+@router.post("/task/{task_id}/resume")
+def resume_task(task_id: str):
+    """Resume a paused task."""
+    ok, msg = _registry.resume(task_id)
+    return {"task_id": task_id, "resumed": ok, "message": msg}
+
+
 # ── Warmup ────────────────────────────────────────────────────────────────────
 
 @router.post("/warmup")
