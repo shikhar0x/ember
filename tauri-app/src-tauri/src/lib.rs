@@ -205,7 +205,7 @@ fn start_backend(app: &tauri::AppHandle) {
     *backend_child().lock().unwrap() = Some(child);
 
     let mut started = false;
-    for _ in 0..120 {
+    for _ in 0..180 {
         if is_backend_ready() {
             println!("Backend ready!");
             started = true;
@@ -215,7 +215,7 @@ fn start_backend(app: &tauri::AppHandle) {
     }
 
     if !started {
-        println!("Backend did not become ready after 60 seconds.");
+        println!("Backend did not become ready after 90 seconds.");
     }
 }
 
