@@ -42,6 +42,13 @@ def init_routes(controller, registry):
     _controller = controller
     _registry = registry
 
+@router.get("/me")
+def get_me():
+    from core.spotify import _tm
+    profile = getattr(_tm, "_user_profile", None)
+    if not profile:
+        profile = {"display_name": "User", "avatar_url": None, "uri": ""}
+    return profile
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
