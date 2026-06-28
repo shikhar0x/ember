@@ -121,6 +121,17 @@ def create_app(
             raise HTTPException(status_code=503, detail="Warming up")
         return {"ready": True}
 
+    @_app.get("/status")
+    async def status():
+        from core.spotify import _tm
+        return {
+            "ready": getattr(_tm, "_warmup_done", False),
+            "message": getattr(_tm, "_warmup_message", "Connecting to Spotify..."),
+            "needs_login": getattr(_tm, "_needs_login", False),
+            "has_profile": getattr(_tm, "_user_profile", None) is not None,
+        }
+
+
     _app.include_router(router)
 
     _controller = controller or DownloadController(
