@@ -44,6 +44,11 @@ class TokenManager:
         self._client_token_expires_at: float = 0.0
         self._lock = threading.Lock()
 
+        self._user_profile: dict | None = None
+        self._warmup_message: str = "Connecting to Spotify..."
+        self._needs_login: bool = False
+        self._warmup_done: bool = False
+
         self._browser_info: BrowserInfo | None = None
         self._driver_path: str | None = None
 
@@ -54,8 +59,10 @@ class TokenManager:
                 self._expires_at = data.get("expires_at", 0)
                 self._client_token = data.get("client_token", "")
                 self._client_token_expires_at = data.get("client_token_expires_at", 0.0)
-                if self._bearer and time.time() < self._expires_at:
-                    print("[TokenManager] Loaded cached token")
+                self._user_profile = data.get("user_profile")
+                if self._bearer and time.time() < self._expires_at and self._user_profile:
+                    name = (self._user_profile or {}).get("display_name", "user")
+                    print(f"[TokenManager] Loaded cached token for {name}")
                 else:
                     self._bearer = None
         except Exception:
@@ -128,10 +135,11 @@ class TokenManager:
         options = Options()
         options.binary_location = browser_info.binary
         options.add_argument("--no-sandbox")
-        options.add_argument("--disable-gpu")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-blink-features=AutomationControlled")
-        options.page_load_strategy = 'eager'
+        options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+        options.add_experimental_option("useAutomationExtension", False)
+        options.add_experimental_option("detach", True)
         options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
         import os
@@ -152,7 +160,16 @@ class TokenManager:
                 options.add_argument("--profile-directory=Default")
         else:
             # Linux/Mac: use visible profile/window to bypass WAF.
-            options.add_argument("--disable-extensions")
+            if "brave" in bname:
+                user_data_dir = os.path.expanduser("~/.config/BraveSoftware/Brave-Browser")
+            elif "chrome" in bname:
+                user_data_dir = os.path.expanduser("~/.config/google-chrome")
+                
+            if user_data_dir and os.path.exists(user_data_dir):
+                options.add_argument(f"--user-data-dir={user_data_dir}")
+                options.add_argument("--profile-directory=Default")
+            else:
+                options.add_argument("--disable-extensions")
 
         import subprocess
         service_kwargs = {}
@@ -182,95 +199,150 @@ class TokenManager:
         bearer = None
         try:
             driver.set_page_load_timeout(10)
-            
-            if sys.platform != "win32":
-                try:
-                    import browser_cookie3
-                    cj = None
-                    b_name = browser_info.name.lower()
-                    if "brave" in b_name:
-                        cj = browser_cookie3.brave(domain_name="spotify.com")
-                    elif "chrome" in b_name:
-                        cj = browser_cookie3.chrome(domain_name="spotify.com")
-                    elif "edge" in b_name:
-                        cj = browser_cookie3.edge(domain_name="spotify.com")
-                    elif "firefox" in b_name:
-                        cj = browser_cookie3.firefox(domain_name="spotify.com")
-                    
-                    if cj:
-                        try:
-                            # Go to base domain so Selenium accepts the cookies
-                            try:
-                                driver.get("https://spotify.com")
-                            except Exception:
-                                pass # Ignore timeouts, we just need the domain context
-                            
-                            driver.delete_all_cookies()
-                            
-                            for c in cj:
-                                domain = c.domain
-                                if domain.startswith('.'):
-                                    domain = domain[1:]
-                                    
-                                cookie_dict = {
-                                    'name': c.name, 
-                                    'value': c.value, 
-                                    'domain': domain, 
-                                    'path': c.path
-                                }
-                                if c.expires:
-                                    cookie_dict['expiry'] = c.expires
-                                    
-                                try:
-                                    driver.add_cookie(cookie_dict)
-                                except Exception:
-                                    pass # Skip cookies that Selenium rejects
-                            
-                            print(f"[TokenManager] Cookies injected successfully.")
-                        except Exception as ce:
-                            print(f"[TokenManager] Cookie injection error: {ce}")
-                    else:
-                        print(f"[TokenManager] No cookies found by browser_cookie3!")
-                except Exception as b3_err:
-                    print(f"[TokenManager] browser_cookie3 fatal error: {b3_err}")
+
+
+
+            self._warmup_message = "Connecting to Spotify..."
+            self._needs_login = False
 
             try:
-                driver.get("https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b")
+                driver.get("https://open.spotify.com")
             except Exception:
-                pass # Spotify often keeps the connection open, timing out the page load. This is fine.
+                pass  # eager load, fine
 
+            # Wait up to 10 seconds for silent harvest
             start = time.time()
-            while time.time() - start < 15 and not bearer:
+            while time.time() - start < 10 and not bearer:
                 time.sleep(1)
                 for log in driver.get_log("performance"):
                     msg = json.loads(log["message"])["message"]
                     method = msg.get("method", "")
-                    
-                    # Strategy 1: HTTP Authorization header
-                    if method == "Network.requestWillBeSentExtraInfo":
-                        headers = msg.get("params", {}).get("headers", {})
-                        auth = (
-                            headers.get("authorization")
-                            or headers.get("Authorization")
-                        )
-                        if auth and "Bearer" in auth:
-                            bearer = auth
-                    
-                    # Strategy 2: access_token in WebSocket URL (e.g. gae2-dealer.g2.spotify.com)
-                    if not bearer and method == "Network.webSocketCreated":
+                    if method == "Network.webSocketCreated":
                         ws_url = msg.get("params", {}).get("url", "")
                         if "access_token=" in ws_url:
                             token = ws_url.split("access_token=")[1].split("&")[0]
                             if token:
                                 bearer = f"Bearer {token}"
-                                
+                                break
                 if bearer:
                     break
+
+            if not bearer:
+                # Flip state — frontend will show login prompt on next poll (within 800ms)
+                self._needs_login = True
+                self._warmup_message = "Please log in to Spotify in the browser window..."
+                print("[TokenManager] No session found — showing login page...")
+
+                try:
+                    driver.get("https://accounts.spotify.com/login")
+                except Exception:
+                    pass
+
+                # Wait up to 5 minutes for user to log in
+                login_start = time.time()
+                while time.time() - login_start < 300 and not bearer:
+                    time.sleep(0.5)
+                    try:
+                        current_url = driver.current_url
+                    except Exception:
+                        continue
+
+                    if ("status" in current_url and "accounts.spotify.com" in current_url) or ("open.spotify.com" in current_url and "/track/" not in current_url):
+                        try:
+                            driver.get("https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b")
+                        except Exception:
+                            pass
+                        time.sleep(1)
+                        continue
+
+                    if "open.spotify.com/track/" in current_url:
+                        # User logged in, track page reached
+                        self._needs_login = False
+                        self._warmup_message = "Fetching your profile..."
+                        time.sleep(2)  # let page hydrate
+
+                        # Harvest from logs
+                        for log in driver.get_log("performance"):
+                            msg = json.loads(log["message"])["message"]
+                            method = msg.get("method", "")
+                            if method == "Network.webSocketCreated":
+                                ws_url = msg.get("params", {}).get("url", "")
+                                if "access_token=" in ws_url:
+                                    token = ws_url.split("access_token=")[1].split("&")[0]
+                                    if token:
+                                        bearer = f"Bearer {token}"
+                                        break
+                            if method == "Network.requestWillBeSentExtraInfo":
+                                headers = msg.get("params", {}).get("headers", {})
+                                auth = headers.get("authorization") or headers.get("Authorization")
+                                if auth and "Bearer" in auth:
+                                    bearer = auth
+                                    break
+                        if bearer:
+                            break
+
+            if bearer:
+                self._warmup_message = "Fetching your profile..."
+                try:
+                    from selenium.webdriver.common.by import By
+                    from selenium.webdriver.support.ui import WebDriverWait
+                    from selenium.webdriver.support import expected_conditions as EC
+                    
+                    # Extract directly from the user widget button on the homepage!
+                    try:
+                        btn = WebDriverWait(driver, 8).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="user-widget-link"], [data-testid="user-widget-avatar"]'))
+                        )
+                        
+                        # The aria-label usually contains the user's name
+                        display_name = btn.get_attribute("aria-label") or btn.get_attribute("title") or "User"
+                        
+                        # Use Javascript to open the menu and extract the profile link URL
+                        profile_url = driver.execute_script("""
+                            let btn = document.querySelector('[data-testid="user-widget-link"]');
+                            if (btn) btn.click();
+                            let links = Array.from(document.querySelectorAll('a[href*="/user/"]'));
+                            let profileLink = links.find(a => a.textContent.includes('Profile') || a.innerText.includes('Profile'));
+                            return profileLink ? profileLink.href : null;
+                        """)
+                        
+                        avatar_url = None
+                        if profile_url:
+                            driver.get(profile_url)
+                            try:
+                                # Wait for the high-res image on the profile page
+                                img = WebDriverWait(driver, 5).until(
+                                    EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="user-image"] img, [data-testid="entity-image"]'))
+                                )
+                                avatar_url = img.get_attribute("src")
+                            except:
+                                pass
+                        
+                        # Fallback to low-res image if the high-res one couldn't be fetched
+                        if not avatar_url:
+                            try:
+                                img = btn.find_element(By.CSS_SELECTOR, "img")
+                                avatar_url = img.get_attribute("src")
+                            except:
+                                avatar_url = None
+                            
+                        self._user_profile = {
+                            "display_name": display_name,
+                            "avatar_url": avatar_url,
+                            "uri": ""
+                        }
+                        print(f"[TokenManager] Profile scraped successfully: {display_name}")
+                    except Exception as scrape_err:
+                        print(f"[TokenManager] Could not find profile widget directly: {scrape_err}")
+                        raise scrape_err
+                except Exception as e:
+                    print(f"[TokenManager] Profile UI scrape failed: {e}")
+                    # Non-fatal — app works fine without profile
+
         finally:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+            # We don't close the browser anymore.
+            # We use detach=True and let the user manually close it.
+            pass
 
         if not bearer:
             raise RuntimeError(
@@ -278,14 +350,11 @@ class TokenManager:
                 "Make sure you are logged in to Spotify in that browser."
             )
 
-        # Invalidate stale client-token — forces re-fetch below
-        self._client_token = ""
-        self._client_token_expires_at = 0.0
-
+        self._warmup_message = "Almost ready..."
         self._bearer = bearer
         self._expires_at = time.time() + 3300
-
-        # Fetch fresh client-token now so we can persist both together
+        self._client_token = ""
+        self._client_token_expires_at = 0.0
         self._fetch_client_token()
 
         with open(self.CACHE_FILE, "w") as f:
@@ -295,11 +364,14 @@ class TokenManager:
                     "expires_at": self._expires_at,
                     "client_token": self._client_token,
                     "client_token_expires_at": self._client_token_expires_at,
+                    "user_profile": self._user_profile,
                 },
                 f,
                 indent=2,
             )
-        print(f"[TokenManager] Token harvested successfully from {browser_info.name}.")
+        name = (self._user_profile or {}).get("display_name", "user")
+        print(f"[TokenManager] Ready. Welcome, {name}!")
+        self._warmup_done = True
 
     # ── Public API ────────────────────────────────────────────────────────────
 
