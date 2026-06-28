@@ -1,17 +1,37 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-
+  import { fade, fly, scale } from 'svelte/transition';
   // ── State ──────────────────────────────────────────────────────────────────
   let url = "";
   let statusText = "Ready";
+  
+  // Helper to get the idle status text
+  function getIdleText() {
+    if (isExpanding) return "Ready";
+    return userProfile?.display_name ? `Welcome, ${userProfile.display_name}!` : "Ready";
+  }
   let progress = 0.0;
   let isDownloading = false;
-  let isWarmup = false;
   let isFetching = false;          // loading track info
+  let searchHistory: string[] = []; // Search history array
+  let isProfileMenuOpen = false;   // Profile dropdown state
+  let clockMonth = "";
+  let clockDay = "";
+  let clockTime = "";
   let fetchError = "";
 
-  $: isBusy = isDownloading || isWarmup || isFetching;
+  type AppState = "loading" | "greeting" | "main";
+  let appState: AppState = "loading";
+  let statusMessage = "Connecting to Spotify...";
+  let needsLogin = false;
+  let userProfile: {
+    display_name: string;
+    avatar_url: string | null;
+    uri: string;
+  } | null = null;
+
+  $: isBusy = appState === "loading" || isDownloading || isFetching;
 
   let taskId: string | null = null;
   let pollInterval: number | null = null;
@@ -85,8 +105,8 @@
   let history: HistorySnapshot[] = [];
   let historyIndex = -1;
 
-  $: canGoBack = historyIndex > 0 && !isDownloading;
-  $: canGoForward = historyIndex < history.length - 1 && !isDownloading;
+  $: canGoBack = historyIndex >= 0 && !isDownloading && !isFetching && !transitioning;
+  $: canGoForward = historyIndex < history.length - 1 && !isDownloading && !isFetching && !transitioning;
 
   $: showDetails = track !== null || isPlaylist;
   $: loadedCount = playlistTracks.filter(t => t !== null).length;
@@ -125,32 +145,64 @@
 
   // ── Warmup ─────────────────────────────────────────────────────────────────
   onMount(() => {
-    isWarmup = true;
-    statusText = "System active...";
-    
-    // Poll the backend until it's responsive
-    function attemptWarmup() {
-      fetch(`${API_BASE}/warmup`, { method: "POST" })
-        .then(res => {
-          if (!res.ok) throw new Error("not ready");
-          isWarmup = false; 
-          if (!isDownloading) statusText = "Ready";
-        })
-        .catch(() => {
-          setTimeout(attemptWarmup, 1000);
-        });
+    // Clock setup
+    const updateTime = () => {
+      const now = new Date();
+      clockMonth = now.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+      clockDay = now.getDate().toString().padStart(2, '0');
+      const h = now.getHours().toString().padStart(2, '0');
+      const min = now.getMinutes().toString().padStart(2, '0');
+      clockTime = `${h}:${min}`;
+    };
+    updateTime();
+    const clockInterval = setInterval(updateTime, 1000);
+
+    // Load search history from local storage
+    const hist = localStorage.getItem("searchHistory");
+    if (hist) {
+      try { searchHistory = JSON.parse(hist); } catch (e) {}
     }
 
-    // Attempt to start the backend via Tauri
-    // Since this runs after onMount, the UI is already fully rendered!
     if ('__TAURI_INTERNALS__' in window) {
-        invoke('init_backend').then(() => {
-            attemptWarmup();
-        }).catch(console.error);
+      invoke('init_backend')
+        .then(() => startStatusPolling())
+        .catch(console.error);
     } else {
-        attemptWarmup();
+      startStatusPolling();
     }
+    
+    return () => clearInterval(clockInterval);
   });
+
+  function startStatusPolling() {
+    async function poll() {
+      try {
+        const res = await fetch(`${API_BASE}/status`);
+        if (!res.ok) throw new Error("not ready");
+        const data = await res.json();
+
+        statusMessage = data.message;
+        needsLogin = data.needs_login;
+
+        if (data.ready) {
+          // Fetch profile then transition to greeting
+          try {
+            const me = await fetch(`${API_BASE}/me`);
+            if (me.ok) {
+              userProfile = await me.json();
+              statusText = getIdleText();
+            }
+          } catch { /* non-fatal */ }
+
+          appState = "main";
+          return; // stop polling
+        }
+      } catch { /* backend not up yet */ }
+
+      setTimeout(poll, 800);
+    }
+    poll();
+  }
 
 
 
@@ -165,6 +217,16 @@
     fetchError = "";
     isFetching = true;
     statusText = "Inspecting...";
+    
+    // Update search history
+    const trimmedUrl = url.trim();
+    if (!searchHistory.includes(trimmedUrl)) {
+      searchHistory = [trimmedUrl, ...searchHistory].slice(0, 10);
+      localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
+    } else {
+      searchHistory = [trimmedUrl, ...searchHistory.filter(h => h !== trimmedUrl)].slice(0, 10);
+      localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
+    }
 
     const es = new EventSource(`${API_BASE}/inspect?url=${encodeURIComponent(url.trim())}`);
 
@@ -179,7 +241,7 @@
             isExpanding = true;
             await new Promise(r => setTimeout(r, 100));
             transitioning = false;
-            statusText = "Ready";
+            statusText = getIdleText();
             isFetching = false;
             es.close();
             pushSnapshot();
@@ -218,7 +280,7 @@
         else if (msg.type === "done") {
             // fill any nulls (tracks without track_id that were emitted inline)
             playlistTracks = playlistTracks.filter((t: TrackInfo | null) => t !== null);
-            statusText = "Ready";
+            statusText = getIdleText();
             isFetching = false;
             es.close();
             pushSnapshot();
@@ -226,7 +288,7 @@
 
         else if (msg.type === "error") {
             fetchError = msg.message;
-            statusText = "Ready";
+            statusText = getIdleText();
             isFetching = false;
             es.close();
         }
@@ -234,7 +296,7 @@
 
     es.onerror = () => {
         fetchError = "Connection error";
-        statusText = "Ready";
+        statusText = getIdleText();
         isFetching = false;
         es.close();
     };
@@ -254,7 +316,7 @@
     isExpanding = false;
     transitioning = false;
     fetchError = "";
-    statusText = "Ready";
+    statusText = getIdleText();
     progress = 0;
     batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
     downloadSuccess = null;
@@ -289,7 +351,7 @@
     downloadSuccess = null;
     progress = 0;
     taskId = null;
-    statusText = "Ready";
+    statusText = getIdleText();
     batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
     fetchError = "";
     // Restore snapshot state
@@ -309,8 +371,19 @@
     if (!canGoBack) return;
     transitioning = true;
     await new Promise(r => setTimeout(r, 280));
-    historyIndex--;
-    restoreSnapshot(history[historyIndex]);
+    if (historyIndex > 0) {
+      historyIndex--;
+      restoreSnapshot(history[historyIndex]);
+    } else {
+      // Go back to home screen
+      historyIndex = -1;
+      isExpanding = false;
+      url = "";
+      track = null;
+      isPlaylist = false;
+      playlistTracks = [];
+      statusText = getIdleText();
+    }
     transitioning = false;
   }
 
@@ -539,7 +612,28 @@
       isDownloading = false;
     }
   }
+  function toggleProfileMenu(e: Event) {
+    e.stopPropagation();
+    isProfileMenuOpen = !isProfileMenuOpen;
+  }
+
+  function closeProfileMenu() {
+    isProfileMenuOpen = false;
+  }
+
+  function clearHistory() {
+    searchHistory = [];
+    localStorage.removeItem("searchHistory");
+  }
+
+  function loadHistoryUrl(h: string) {
+    url = h;
+    closeProfileMenu();
+    inspectUrl();
+  }
 </script>
+
+<svelte:window onclick={closeProfileMenu} />
 
 <svelte:head>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -547,32 +641,91 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 </svelte:head>
 
-<main class="container">
-  <div class="background-effects">
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-    <div class="orb orb-3"></div>
+{#if appState === "loading"}
+  <div class="onboarding-screen" transition:fade={{ duration: 300 }}>
+    <div class="onboarding-logo">
+      <h1>Ember</h1>
+    </div>
+
+    <div class="onboarding-status">
+      <div class="status-gif-wrapper" class:active={!needsLogin}>
+        <img src="/loader.gif" alt="" class="status-gif" class:active={!needsLogin} />
+      </div>
+      <p class="onboarding-message">{statusMessage}</p>
+    </div>
+
+    {#if needsLogin}
+      <p class="login-hint">
+        Complete the login in the browser window that just opened.
+        <br/>This only happens once.
+      </p>
+    {/if}
+  </div>
+{/if}
+
+
+
+{#if appState === "main"}
+  <div class="clock-widget" class:compact={isExpanding} transition:fade={{duration: 400}}>
+    <div class="clock-date">
+      <span class="clock-month">{clockMonth}</span>
+      <span class="clock-day">{clockDay}</span>
+    </div>
+    <div class="clock-divider"></div>
+    <div class="clock-time">{clockTime}</div>
   </div>
 
-  <div class="content-wrapper" class:wide={isExpanding}>
-
-    <!-- ── NAV ARROWS ──────────────────────────────────────────────── -->
-    {#if history.length > 0}
-      <div class="nav-arrows">
-        <button
-          class="nav-btn"
-          onclick={goBack}
-          disabled={!canGoBack}
-          aria-label="Go back"
-        >‹</button>
-        <button
-          class="nav-btn"
-          onclick={goForward}
-          disabled={!canGoForward}
-          aria-label="Go forward"
-        >›</button>
+  {#if userProfile}
+    <div class="profile-widget" class:compact={isExpanding} transition:fade={{duration: 400}}>
+      <div class="nav-arrows-inline">
+        <button class="nav-btn" onclick={goBack} disabled={!canGoBack} aria-label="Go back">‹</button>
+        <button class="nav-btn" onclick={goForward} disabled={!canGoForward} aria-label="Go forward">›</button>
       </div>
-    {/if}
+      
+      <div class="profile-divider"></div>
+
+      <button class="profile-btn" onclick={toggleProfileMenu}>
+        {#if userProfile.avatar_url}
+          <img class="profile-avatar" src={userProfile.avatar_url} alt="Avatar" />
+        {/if}
+        <span class="profile-name">{(userProfile.display_name || 'User').split(' ')[0]}</span>
+      </button>
+      
+      {#if isProfileMenuOpen}
+        <div class="profile-dropdown" onclick={(e) => e.stopPropagation()}>
+          <div class="profile-menu-header">
+            <span>Search History</span>
+            {#if searchHistory.length > 0}
+              <button class="clear-history-btn" onclick={clearHistory} title="Clear History">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+                </svg>
+              </button>
+            {/if}
+          </div>
+          <div class="profile-menu-list">
+            {#if searchHistory.length === 0}
+              <div class="profile-menu-empty">No history yet</div>
+            {:else}
+              {#each searchHistory as h}
+                <button class="profile-menu-item" onclick={() => loadHistoryUrl(h)} title={h}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  <span>{h}</span>
+                </button>
+              {/each}
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+<main class="container">
+
+  <div class="content-wrapper" class:wide={isExpanding}>
 
     <!-- ── HEADER ────────────────────────────────────────────────────────── -->
     <header class:compact={isExpanding}>
@@ -599,7 +752,7 @@
             disabled={isBusy || !url}
             class:loading={isBusy}
           >
-            <span class="btn-text">{isFetching ? "Inspecting..." : isWarmup ? "Preparing..." : "Inspect"}</span>
+            <span class="btn-text">{isFetching ? "Inspecting..." : appState === "loading" ? "Preparing..." : "Inspect"}</span>
             <div class="btn-glow"></div>
           </button>
         </div>
@@ -933,8 +1086,20 @@
 
   </div>
 </main>
+{/if}
 
 <style>
+  :global(*) {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+  }
+  
+  /* Allow selection specifically in input fields if needed later */
+  :global(input), :global(textarea) {
+    user-select: auto;
+    -webkit-user-select: auto;
+  }
   /* ── Global ──────────────────────────────────────────────────────────────── */
   :global(html, body) {
     margin: 0; padding: 0;
@@ -1035,7 +1200,6 @@
   /* ── Home glass card ─────────────────────────────────────────────────────── */
   .glass-card {
     background: rgba(255,255,255,0.03);
-    backdrop-filter: blur(32px) saturate(1.4); -webkit-backdrop-filter: blur(32px) saturate(1.4);
     border-radius: 24px; padding: 2.5rem;
     box-shadow: 
       0 25px 50px -12px rgba(0,0,0,0.5),
@@ -1192,7 +1356,6 @@
     align-items: stretch;
     gap: 2.5rem;
     background: rgba(255,255,255,0.03);
-    backdrop-filter: blur(32px) saturate(1.4); -webkit-backdrop-filter: blur(32px) saturate(1.4);
     border-radius: 24px;
     padding: 2.5rem;
     box-shadow: 
@@ -1282,24 +1445,20 @@
     padding-bottom: 6px;
   }
 
-  /* ── Nav arrows ─────────────────────────────────────────────────────────── */
-  .nav-arrows {
-    position: absolute;
-    top: 1.5rem;
-    left: 1.5rem;
+  /* ── Nav arrows (Inline) ────────────────────────────────────────────────── */
+  .nav-arrows-inline {
     display: flex;
-    gap: 0.35rem;
-    z-index: 10;
+    gap: 0.5rem;
+    padding: 0 0.3rem;
   }
   .nav-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
-    background: rgba(255,255,255,0.04);
-    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.06);
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
     color: rgba(255,255,255,0.75);
-    font-size: 1.15rem;
+    font-size: 2rem;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1307,6 +1466,7 @@
     transition: all 0.2s ease;
     padding: 0;
     line-height: 1;
+    font-family: monospace;
   }
   .nav-btn:hover:not(:disabled) {
     background: rgba(225,29,46,0.12);
@@ -1808,5 +1968,347 @@
     color: #555E6B;
     box-shadow: none;
     transform: none;
+  }
+  /* ── Onboarding screen ───────────────────────────────────────────────────── */
+  .onboarding-screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    z-index: 100;
+  }
+
+  .onboarding-logo h1 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 4rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0;
+    letter-spacing: -1px;
+  }
+
+  .onboarding-status {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.9rem 1.4rem;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .onboarding-message {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #A0A4A8;
+    letter-spacing: 0.03em;
+  }
+
+  .login-hint {
+    font-size: 0.85rem;
+    color: #555E6B;
+    text-align: center;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0.75rem 1.25rem;
+    border-radius: 12px;
+    background: rgba(225,29,46,0.05);
+    border: 1px solid rgba(225,29,46,0.15);
+    max-width: 340px;
+  }
+
+  /* ── Greeting screen ─────────────────────────────────────────────────────── */
+  .greeting-screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    z-index: 100;
+  }
+
+  .greeting-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid rgba(255,255,255,0.1);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+
+  .greeting-text {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .greeting-welcome {
+    margin: 0;
+    font-size: 1rem;
+    color: #A0A4A8;
+    font-weight: 400;
+  }
+
+  .greeting-name {
+    margin: 0;
+    font-family: 'Outfit', sans-serif;
+    font-size: 3rem;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: -1px;
+  }
+
+  .greeting-sub {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #555E6B;
+  }
+
+  .greeting-btn {
+    margin-top: 0.5rem;
+    padding: 0 2.5rem;
+    height: 48px;
+    border-radius: 14px;
+    font-size: 1rem;
+  }
+  /* ── Clock Widget ──────────────────────────────────────────────────────── */
+  .clock-widget {
+    position: fixed;
+    top: 1.5rem;
+    left: 2rem;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.6rem 1.8rem;
+    border-radius: 100px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: rgba(255, 255, 255, 0.9);
+    font-family: 'Inter', sans-serif;
+    user-select: none;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  .clock-widget.compact {
+    top: 0.75rem;
+    transform: scale(0.8);
+    transform-origin: top left;
+  }
+  
+  .clock-date {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.1;
+  }
+  
+  .clock-month {
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #e11d2e;
+  }
+  
+  .clock-day {
+    font-size: 2.5rem;
+    font-weight: 600;
+  }
+  
+  .clock-divider {
+    width: 1px;
+    height: 50px;
+    background: rgba(255, 255, 255, 0.15);
+  }
+  
+  .clock-time {
+    font-size: 1.45rem;
+    font-weight: 300;
+    letter-spacing: 1px;
+  }
+
+  /* ── Profile Widget ──────────────────────────────────────────────────────── */
+  .profile-widget {
+    position: fixed;
+    top: 1.5rem;
+    right: 2.4rem;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.4rem;
+    border-radius: 100px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  .profile-widget.compact {
+    top: 0.75rem;
+    transform: scale(0.8);
+    transform-origin: top right;
+  }
+  
+  .profile-divider {
+    width: 1px;
+    height: 30px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 0 0.6rem;
+  }
+  
+  .profile-btn {
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    background: transparent;
+    padding: 0.3rem 1.2rem 0.3rem 0.3rem;
+    border-radius: 100px;
+    border: none;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    font-family: inherit;
+    outline: none;
+  }
+  
+  .profile-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .profile-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .profile-name {
+    color: #E2E4E9;
+    font-size: 1.35rem;
+    font-weight: 500;
+  }
+  
+  /* ── Profile Dropdown ────────────────────────────────────────────────────── */
+  .profile-dropdown {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    width: 280px;
+    background: rgba(20, 20, 20, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: dropdownSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  @keyframes dropdownSlideIn {
+    from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  
+  .profile-menu-header {
+    padding: 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .clear-history-btn {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+  
+  .clear-history-btn:hover {
+    color: rgba(255, 100, 100, 0.9);
+    background: rgba(255, 100, 100, 0.1);
+  }
+  
+  .clear-history-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+  
+  .profile-menu-list {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 0.5rem;
+  }
+  
+  .profile-menu-list::-webkit-scrollbar {
+    width: 4px;
+  }
+  .profile-menu-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+  }
+  
+  .profile-menu-empty {
+    padding: 1.5rem 1rem;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.9rem;
+  }
+  
+  .profile-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 0.5rem;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.9rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+  }
+  
+  .profile-menu-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+  
+  .profile-menu-item svg {
+    width: 16px;
+    height: 16px;
+    opacity: 0.5;
+    flex-shrink: 0;
+  }
+  
+  .profile-menu-item span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>
