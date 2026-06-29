@@ -1,9 +1,12 @@
 #![allow(unused_imports)]
-use tauri::Manager;
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager};
 use std::net::TcpStream;
 use std::process::{Child, Command};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
+
+
 
 static BACKEND_CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 
@@ -262,7 +265,6 @@ async fn init_backend(app: tauri::AppHandle) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![init_backend])
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
