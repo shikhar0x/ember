@@ -262,6 +262,7 @@ async fn init_backend(app: tauri::AppHandle) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![init_backend])
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
