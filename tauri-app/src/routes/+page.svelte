@@ -1,7 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { fade, fly, scale } from 'svelte/transition';
+  import { fade, fly, scale, crossfade } from 'svelte/transition';
+  import { cubicInOut } from 'svelte/easing';
+  
+  const [send, receive] = crossfade({
+    duration: 800,
+    easing: cubicInOut
+  });
   // ── State ──────────────────────────────────────────────────────────────────
   let url = "";
   let statusText = "Ready";
@@ -182,6 +188,7 @@
         const data = await res.json();
 
         statusMessage = data.message;
+        statusText = data.message;
         needsLogin = data.needs_login;
 
         if (data.ready) {
@@ -642,20 +649,15 @@
 </svelte:head>
 
 {#if appState === "loading"}
-  <div class="onboarding-screen" transition:fade={{ duration: 300 }}>
-    <div class="onboarding-logo">
-      <h1>Ember</h1>
-    </div>
-
-    <div class="onboarding-status">
-      <div class="status-gif-wrapper" class:active={!needsLogin}>
-        <img src="/loader.gif" alt="" class="status-gif" class:active={!needsLogin} />
+  <div class="onboarding-screen" out:fade={{ duration: 400 }}>
+    <div class="status-panel" style="width: max-content;" in:receive={{key: 'status-panel'}} out:send={{key: 'status-panel'}}>
+      <div class="status-gif-wrapper">
+        <img src="/loader.gif" alt="" class="status-gif" />
       </div>
-      <p class="onboarding-message">{statusMessage}</p>
+      <p class="status-label">{statusMessage}</p>
     </div>
-
     {#if needsLogin}
-      <p class="login-hint">
+      <p class="login-hint" transition:fade={{duration: 200}}>
         Complete the login in the browser window that just opened.
         <br/>This only happens once.
       </p>
@@ -663,10 +665,8 @@
   </div>
 {/if}
 
-
-
 {#if appState === "main"}
-  <div class="clock-widget" class:compact={isExpanding} transition:fade={{duration: 400}}>
+  <div class="clock-widget" class:compact={isExpanding} in:fly={{ y: 30, duration: 800, delay: 200 }}>
     <div class="clock-date">
       <span class="clock-month">{clockMonth}</span>
       <span class="clock-day">{clockDay}</span>
@@ -676,7 +676,7 @@
   </div>
 
   {#if userProfile}
-    <div class="profile-widget" class:compact={isExpanding} transition:fade={{duration: 400}}>
+    <div class="profile-widget" class:compact={isExpanding} in:fly={{ y: 30, duration: 800, delay: 200 }}>
       <div class="nav-arrows-inline">
         <button class="nav-btn" onclick={goBack} disabled={!canGoBack} aria-label="Go back">‹</button>
         <button class="nav-btn" onclick={goForward} disabled={!canGoForward} aria-label="Go forward">›</button>
@@ -728,7 +728,7 @@
   <div class="content-wrapper" class:wide={isExpanding}>
 
     <!-- ── HEADER ────────────────────────────────────────────────────────── -->
-    <header class:compact={isExpanding}>
+    <header class:compact={isExpanding} in:fly={{ y: 30, duration: 800 }}>
       <h1>Ember</h1>
       {#if !isExpanding}
         <p class="subtitle">Yours, forever.</p>
@@ -738,7 +738,7 @@
     <!-- ── HOME CARD (URL input) ─────────────────────────────────────────── -->
     {#if !showDetails}
       <div class="glass-card" class:exit={transitioning}>
-        <div class="input-group">
+        <div class="input-group" in:fly={{ y: 30, duration: 800, delay: 100 }}>
           <input
             type="text"
             placeholder="Paste Spotify or YouTube link here..."
@@ -761,12 +761,19 @@
           <p class="fetch-error">⚠ {fetchError}</p>
         {/if}
 
-        <div class="status-panel" class:active={isBusy}>
+        <div class="status-panel" class:active={isBusy} in:receive={{key: 'status-panel'}} out:send={{key: 'status-panel'}}>
           <div class="gif-wrapper" class:active={isBusy}>
             <img src="/loader.gif" alt="Status" class="status-gif" class:active={isBusy} />
           </div>
           <p class="status-label">{statusText}</p>
         </div>
+        
+        {#if needsLogin}
+          <p class="login-hint">
+            Complete the login in the browser window that just opened.
+            <br/>This only happens once.
+          </p>
+        {/if}
       </div>
     {/if}
 
@@ -1166,7 +1173,7 @@
   }
   .content-wrapper.wide {
     position: absolute;
-    inset: 2rem 2.4rem 2rem 2rem;
+    inset: 3rem 2.4rem 2rem 2rem;
     max-width: none;
     width: auto;
     padding: 0;
@@ -1279,18 +1286,12 @@
   .btn-text { position: relative; z-index: 1; }
   .btn-glow {
     position: absolute; inset: 0;
-    background: linear-gradient(135deg, rgba(225,29,46,0.9) 0%, rgba(255,85,85,1) 50%, rgba(225,29,46,0.9) 100%);
-    background-size: 200% 200%;
-    opacity: 0; transition: opacity .5s ease-in-out;
-    animation: btn-gradient-shift 3s infinite linear;
-  }
-  @keyframes btn-gradient-shift {
-    0% { background-position: 0% 50%; }
-    100% { background-position: 200% 50%; }
+    background: radial-gradient(circle at center, rgba(225,29,46,0.4) 0%, transparent 100%);
+    opacity: 0; transition: opacity 0.3s ease;
   }
   button:hover:not(:disabled) .btn-glow { opacity: 1; }
-  button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(225,29,46,.5), inset 0 1px 2px rgba(255,255,255,0.3); }
-  button:active:not(:disabled) { transform: translateY(0); }
+  button:hover:not(:disabled) { transform: scale(1.02); box-shadow: 0 6px 20px rgba(225,29,46,.5), inset 0 1px 2px rgba(255,255,255,0.3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
   button:disabled { 
     background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); 
     border-color: rgba(255,255,255,0.02);
@@ -1648,6 +1649,12 @@
     border-radius: 14px; font-size: 1rem;
     margin-top: .25rem;
   }
+  .dl-btn:hover:not(:disabled) {
+    transform: scale(1.01);
+  }
+  .dl-btn:active:not(:disabled) {
+    transform: scale(0.99);
+  }
   .dl-btn.downloading {
     background: #1F2833;
     border: 1px solid rgba(225,29,46,.3);
@@ -2000,6 +2007,22 @@
     border: 1px solid rgba(255,255,255,0.05);
   }
 
+  .status-gif-wrapper {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+  }
+  .status-gif-wrapper::before {
+    content: '';
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(58, 134, 255, 0.8) 0%, transparent 70%);
+    opacity: 0.5;
+    filter: blur(8px);
+  }
+
   .onboarding-message {
     margin: 0;
     font-size: 0.95rem;
@@ -2099,8 +2122,8 @@
   }
   
   .clock-widget.compact {
-    top: 0.75rem;
-    transform: scale(0.8);
+    top: 0.5rem;
+    transform: scale(0.75);
     transform-origin: top left;
   }
   
@@ -2154,8 +2177,8 @@
   }
   
   .profile-widget.compact {
-    top: 0.75rem;
-    transform: scale(0.8);
+    top: 0.5rem;
+    transform: scale(0.75);
     transform-origin: top right;
   }
   
@@ -2182,6 +2205,11 @@
   
   .profile-btn:hover {
     background: rgba(255, 255, 255, 0.08);
+    transform: scale(1.02);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  }
+  .profile-btn:active {
+    transform: scale(0.98);
   }
 
   .profile-avatar {
@@ -2218,6 +2246,16 @@
   @keyframes dropdownSlideIn {
     from { opacity: 0; transform: translateY(-10px) scale(0.98); }
     to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .profile-widget.compact .profile-dropdown {
+    transform-origin: top right;
+    animation: dropdownSlideInCompact 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  
+  @keyframes dropdownSlideInCompact {
+    from { opacity: 0; transform: translateY(-10px) scale(1.306666); }
+    to { opacity: 1; transform: translateY(0) scale(1.333333); }
   }
   
   .profile-menu-header {
