@@ -2,11 +2,11 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { fade, fly, scale, crossfade } from 'svelte/transition';
-  import { cubicInOut } from 'svelte/easing';
+  import { quintOut } from 'svelte/easing';
   
   const [send, receive] = crossfade({
     duration: 800,
-    easing: cubicInOut
+    easing: quintOut
   });
   // ── State ──────────────────────────────────────────────────────────────────
   let url = "";
@@ -649,12 +649,12 @@
 </svelte:head>
 
 {#if appState === "loading"}
-  <div class="onboarding-screen" out:fade={{ duration: 400 }}>
-    <div class="status-panel" style="width: max-content;" in:receive={{key: 'status-panel'}} out:send={{key: 'status-panel'}}>
-      <div class="status-gif-wrapper">
+  <div class="onboarding-screen">
+    <div class="status-panel" style="position: relative; z-index: 10; width: max-content;" in:receive={{key: 'status-panel'}} out:send={{key: 'status-panel'}}>
+      <div class="status-gif-wrapper" in:receive={{key: 'gif'}} out:send={{key: 'gif'}}>
         <img src="/loader.gif" alt="" class="status-gif" />
       </div>
-      <p class="status-label">{statusMessage}</p>
+      <p class="status-label" in:receive={{key: 'text'}} out:send={{key: 'text'}}>{statusMessage}</p>
     </div>
     {#if needsLogin}
       <p class="login-hint" transition:fade={{duration: 200}}>
@@ -666,7 +666,7 @@
 {/if}
 
 {#if appState === "main"}
-  <div class="clock-widget" class:compact={isExpanding} in:fly={{ y: 30, duration: 800, delay: 200 }}>
+  <div class="clock-widget" class:compact={isExpanding} in:fly={{ y: 30, duration: 800, delay: 200, easing: quintOut }}>
     <div class="clock-date">
       <span class="clock-month">{clockMonth}</span>
       <span class="clock-day">{clockDay}</span>
@@ -676,7 +676,7 @@
   </div>
 
   {#if userProfile}
-    <div class="profile-widget" class:compact={isExpanding} in:fly={{ y: 30, duration: 800, delay: 200 }}>
+    <div class="profile-widget" class:compact={isExpanding} in:fly={{ y: 30, duration: 800, delay: 200, easing: quintOut }}>
       <div class="nav-arrows-inline">
         <button class="nav-btn" onclick={goBack} disabled={!canGoBack} aria-label="Go back">‹</button>
         <button class="nav-btn" onclick={goForward} disabled={!canGoForward} aria-label="Go forward">›</button>
@@ -728,7 +728,7 @@
   <div class="content-wrapper" class:wide={isExpanding}>
 
     <!-- ── HEADER ────────────────────────────────────────────────────────── -->
-    <header class:compact={isExpanding} in:fly={{ y: 30, duration: 800 }}>
+    <header class:compact={isExpanding} in:fly={{ y: 30, duration: 800, easing: quintOut }}>
       <h1>Ember</h1>
       {#if !isExpanding}
         <p class="subtitle">Yours, forever.</p>
@@ -738,7 +738,7 @@
     <!-- ── HOME CARD (URL input) ─────────────────────────────────────────── -->
     {#if !showDetails}
       <div class="glass-card" class:exit={transitioning}>
-        <div class="input-group" in:fly={{ y: 30, duration: 800, delay: 100 }}>
+        <div class="input-group" in:fly={{ y: 30, duration: 800, delay: 100, easing: quintOut }}>
           <input
             type="text"
             placeholder="Paste Spotify or YouTube link here..."
@@ -762,10 +762,10 @@
         {/if}
 
         <div class="status-panel" class:active={isBusy} in:receive={{key: 'status-panel'}} out:send={{key: 'status-panel'}}>
-          <div class="gif-wrapper" class:active={isBusy}>
+          <div class="gif-wrapper" class:active={isBusy} in:receive={{key: 'gif'}} out:send={{key: 'gif'}}>
             <img src="/loader.gif" alt="Status" class="status-gif" class:active={isBusy} />
           </div>
-          <p class="status-label">{statusText}</p>
+          <p class="status-label" in:receive={{key: 'text'}} out:send={{key: 'text'}}>{statusText}</p>
         </div>
         
         {#if needsLogin}
@@ -1182,7 +1182,7 @@
   }
 
   /* ── Header ──────────────────────────────────────────────────────────────── */
-  header { text-align: center; margin-bottom: 2.5rem; transition: all 0.3s ease; }
+  header { text-align: center; margin-bottom: 2.5rem; transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
   header.compact {
     margin-bottom: 1rem;
     padding-top: 0;
@@ -1194,7 +1194,7 @@
     margin: 0; color: #FFFFFF;
     text-shadow: 0 2px 4px rgba(0,0,0,.5);
     letter-spacing: -1px;
-    transition: font-size 0.3s ease;
+    transition: font-size 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   }
   header.compact h1 { font-size: 2rem; }
 
@@ -1208,15 +1208,11 @@
   .glass-card {
     background: rgba(255,255,255,0.03);
     border-radius: 24px; padding: 2.5rem;
-    box-shadow: 
-      0 25px 50px -12px rgba(0,0,0,0.5),
-      inset 0 1px 1px rgba(255,255,255,0.15),
-      inset 1px 0 1px rgba(255,255,255,0.05),
-      inset -1px -1px 1px rgba(255,255,255,0.02);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.04);
     opacity: 1;
     transform: scale(1) translateY(0);
-    transition: opacity 0.28s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .glass-card:hover {
     box-shadow: 
@@ -1244,7 +1240,7 @@
     color: rgba(255,255,255,0.95); padding: 1rem 1.5rem;
     border-radius: 12px; font-size: 1.05rem;
     font-family: 'Inter', sans-serif; outline: none;
-    transition: all .3s cubic-bezier(.4,0,.2,1);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     box-shadow: inset 0 2px 4px rgba(0,0,0,.3);
   }
   input::placeholder { color: rgba(255,255,255,0.4); }
@@ -1280,7 +1276,7 @@
     padding: 0 2rem;
     border-radius: 12px; font-size: 1.05rem; font-weight: 600;
     font-family: 'Inter', sans-serif; cursor: pointer; overflow: hidden;
-    transition: all .4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     box-shadow: 0 4px 14px rgba(225,29,46,.3), inset 0 1px 1px rgba(255,255,255,0.2);
   }
   .btn-text { position: relative; z-index: 1; }
@@ -1306,7 +1302,7 @@
     background: rgba(255,255,255,0.02);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,.05);
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .status-panel.active {
     background: rgba(225, 29, 46, 0.04);
@@ -1370,8 +1366,8 @@
     box-sizing: border-box;
     opacity: 1;
     transform: scale(1) translateY(0);
-    transition: opacity 0.28s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-    animation: detailsIntro 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: detailsIntro 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
     overflow: visible;
   }
 
@@ -1581,7 +1577,7 @@
     background: linear-gradient(90deg, rgba(225,29,46,0.9) 0%, rgba(255,77,106,1) 50%, rgba(225,29,46,0.9) 100%);
     background-size: 200% 100%;
     box-shadow: 0 0 10px rgba(225,29,46,0.5);
-    transition: width 0.3s cubic-bezier(.4,0,.2,1);
+    transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     position: relative;
     border-radius: 999px;
   }
@@ -1754,7 +1750,7 @@
     background-repeat: no-repeat;
     background-position: right 0.75rem center;
     padding-right: 2rem;
-    transition: all .3s ease;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     min-width: 140px;
     box-shadow: inset 0 2px 4px rgba(0,0,0,.2);
   }
@@ -1791,6 +1787,7 @@
     padding: .3rem .8rem;
     border-radius: 8px;
     box-shadow: none;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     cursor: pointer;
   }
   .select-toggle-btn:hover:not(:disabled) {
@@ -1833,7 +1830,7 @@
     background: transparent;
     border: 1px solid transparent;
     cursor: pointer;
-    transition: all .2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all .3s cubic-bezier(0.16, 1, 0.3, 1);
     text-align: left;
     width: auto;
     align-self: stretch;
@@ -1954,8 +1951,7 @@
     border: none;
     border-radius: 0;
     cursor: pointer;
-    transition: all .2s ease;
-    box-shadow: none;
+    transition: all .3s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .format-tab:hover:not(:disabled) {
     background: rgba(255,255,255,0.05);
@@ -1978,14 +1974,14 @@
   }
   /* ── Onboarding screen ───────────────────────────────────────────────────── */
   .onboarding-screen {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 2rem;
-    z-index: 100;
+    z-index: 1000;
+    pointer-events: none; /* Allows clicks to pass through while animating */
+  }
+  .onboarding-screen > * {
+    pointer-events: auto;
   }
 
   .onboarding-logo h1 {
@@ -2197,7 +2193,7 @@
     padding: 0.3rem 1.2rem 0.3rem 0.3rem;
     border-radius: 100px;
     border: none;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     cursor: pointer;
     font-family: inherit;
     outline: none;
