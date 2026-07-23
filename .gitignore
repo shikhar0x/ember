@@ -7,8 +7,10 @@ __pycache__/
 tokens.json
 core/token_store.json
 
-# distribution files
+# distribution/build files
 dist/
+build/
+*.spec
 
 # Tauri / Rust build
 **/target/
