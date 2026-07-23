@@ -1,0 +1,32 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Tokens / secrets
+tokens.json
+core/token_store.json
+
+# distribution files
+dist/
+
+# Tauri / Rust build
+**/target/
+tauri.build.conf.json
+
+# Node
+node_modules/
+
+# SvelteKit
+.svelte-kit/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Backup files
+*.bak
+
+# OS files
+.DS_Store
