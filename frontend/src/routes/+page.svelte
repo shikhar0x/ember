@@ -1230,30 +1230,7 @@
     saveTheme();
   }
 
-  function toggleThemeQuick() {
-    if (manualThemeOverride === 'light') {
-        manualThemeOverride = 'dark';
-        const darkPresets = ['#06070c', '#0f051d', '#05120f', '#081326', '#1d0b0b', '#111115'];
-        const lightPresets = ['#f0f2f5', '#fdf6e3', '#d1fae5', '#e0f2fe', '#ffe4e6', '#e2e8f0'];
-        const idx = lightPresets.indexOf(customBgColor);
-        if (idx !== -1) {
-            customBgColor = darkPresets[idx % darkPresets.length];
-        } else {
-            customBgColor = '#06070c';
-        }
-    } else {
-        manualThemeOverride = 'light';
-        const darkPresets = ['#06070c', '#0f051d', '#05120f', '#081326', '#1d0b0b', '#111115'];
-        const lightPresets = ['#f0f2f5', '#fdf6e3', '#d1fae5', '#e0f2fe', '#ffe4e6', '#e2e8f0'];
-        const idx = darkPresets.indexOf(customBgColor);
-        if (idx !== -1) {
-            customBgColor = lightPresets[idx % lightPresets.length];
-        } else {
-            customBgColor = '#f0f2f5';
-        }
-    }
-    saveTheme();
-  }
+
 
   function clearWallpaper() {
     customWallpaperUrl = "";
@@ -2026,11 +2003,6 @@
               </svg>
             {/if}
             <span class="search-divider">|</span>
-            <button class="theme-toggle-btn" onclick={toggleThemeQuick} title="Toggle Light/Dark Theme" transition:fade={{ duration: 150 }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
-                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-              </svg>
-            </button>
             {#if url && !isBusy && (!showDetails || isUrlFocused || isInputHovered)}
               <button class="clear-url-btn" onclick={handleClearUrl} disabled={isBusy} title="Clear URL" transition:fade={{ duration: 150 }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="clear-url-svg"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
             {/if}
@@ -5253,33 +5225,7 @@
   .toast-icon.cancel-icon {
     color: #FFC107;
   }
-  .theme-toggle-btn {
-    position: absolute;
-    right: 3.5rem;
-    top: 50%;
-    transform: translateY(-50%);
-    background: transparent;
-    border: none;
-    color: rgba(255, 255, 255, 0.3);
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    z-index: 10;
-  }
-  .theme-toggle-btn:hover {
-    color: rgba(255, 255, 255, 0.8);
-    transform: translateY(-50%) scale(1.1);
-  }
-  .container.light-theme .theme-toggle-btn {
-    color: rgba(0, 0, 0, 0.3);
-  }
-  .container.light-theme .theme-toggle-btn:hover {
-    color: rgba(0, 0, 0, 0.7);
-  }
+
   .drag-hint {
     display: flex;
     align-items: center;
