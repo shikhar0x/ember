@@ -11,7 +11,7 @@ a = Analysis(
     ['backend/api/server.py'],
     pathex=['backend'],
     binaries=[],
-    datas=collect_data_files('ytmusicapi'),
+    datas=collect_data_files('ytmusicapi') + collect_data_files('yt_dlp'),
     hiddenimports=[
         'uvicorn.logging',
         'uvicorn.loops',
