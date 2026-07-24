@@ -11,6 +11,7 @@ core/token_store.json
 dist/
 build/
 *.spec
+!ember-backend.spec
 
 # Tauri / Rust build
 **/target/
