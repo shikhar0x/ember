@@ -42,7 +42,7 @@ Ember matches Spotify tracks to the best available YouTube source using ISRC cod
 chmod +x setup.sh && ./setup.sh
 
 # Windows
-setup.bat
+./setup.bat
 ```
 
 **3. Launch:**
