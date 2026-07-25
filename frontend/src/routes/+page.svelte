@@ -346,8 +346,10 @@
   $: canGoBack = historyIndex >= 0 && !isDownloading && !isFetching && !transitioning;
   $: canGoForward = historyIndex < history.length - 1 && !isDownloading && !isFetching && !transitioning;
   $: showDetails = track !== null || isPlaylist;
-  $: loadedCount = playlistTracks.filter(t => t !== null).length;
+  $: loadedCount = playlistTracks.filter(t => t !== null && !t.unavailable).length;
   $: allSelected = selectedIndices.size === loadedCount && loadedCount > 0;
+  $: isYoutubePlaylist = isPlaylist && (url.includes("youtube.com") && !url.includes("music.youtube.com"));
+  $: visibleTracks = playlistTracks.map((t, idx) => ({ track: t, originalIndex: idx })).filter(item => item.track === null || !item.track.unavailable);
   let isExpanding = false;
   let isDraggingOver = false;
   let pairedUrl = "";
@@ -483,7 +485,7 @@
     if (allSelected) selectedIndices = new Set();
     else {
       const indices: number[] = [];
-      playlistTracks.forEach((t, i) => { if (t !== null) indices.push(i); });
+      playlistTracks.forEach((t, i) => { if (t !== null && !t.unavailable) indices.push(i); });
       selectedIndices = new Set(indices);
     }
   }
@@ -729,6 +731,8 @@
             playlistTracks = new Array(msg.meta.total_tracks).fill(null);
             selectedIndices = new Set();
             
+            statusText = `Loading ${msg.meta.total_tracks} items...`;
+            isFetching = true;
             transitioning = true;
             await new Promise(r => setTimeout(r, 300));
             isPlaylist = true;
@@ -736,22 +740,26 @@
             isExpanding = true;
             await new Promise(r => setTimeout(r, 100));
             transitioning = false;
-            statusText = `Loading ${msg.meta.total_tracks} tracks...`;
-            isFetching = true;
         }
         else if (msg.type === "track_item") {
             playlistTracks[msg.index] = msg.track;
             playlistTracks = [...playlistTracks];
-            selectedIndices.add(msg.index);
-            selectedIndices = new Set(selectedIndices);
-            const loaded = playlistTracks.filter((t: TrackInfo | null) => t !== null).length;
-            statusText = `Loaded ${loaded} / ${playlistTracks.length} tracks`;
+            if (!msg.track.unavailable) {
+                selectedIndices.add(msg.index);
+                selectedIndices = new Set(selectedIndices);
+            }
+            const loaded = playlistTracks.filter((t: TrackInfo | null) => t !== null && !t.unavailable).length;
+            statusText = `Loaded ${loaded} / ${playlistTracks.filter((t: TrackInfo | null) => t !== null && !t.unavailable).length} items`;
         }
         else if (msg.type === "update") {
             const existing = playlistTracks[msg.index];
             if (existing && msg.updates) {
                 playlistTracks[msg.index] = { ...existing, ...msg.updates };
                 playlistTracks = [...playlistTracks];
+                if (msg.updates.unavailable) {
+                    selectedIndices.delete(msg.index);
+                    selectedIndices = new Set(selectedIndices);
+                }
             }
         }
         else if (msg.type === "header_update") {
@@ -1056,13 +1064,39 @@
     isDownloading = true;
     statusText = "Starting batch download...";
     progress = 0;
-    batchProgress = { completed: 0, total: selectedIndices.size, succeeded: 0, failed: 0 };
+    
     try {
-      const [codec, quality] = AUDIO_FMT_MAP[selectedFormat] ?? ["mp3", "0"];
-      const selectedTracks = [...selectedIndices].sort((a, b) => a - b).map(i => playlistTracks[i]).filter(t => t !== null);
+      let dlOptions;
+      if (selectedDownloadType === "video") {
+        dlOptions = {
+          format: "Video (MP4)",
+          quality: selectedVideoQuality,
+          audio_codec: "mp3",
+          audio_quality: "0"
+        };
+      } else {
+        const [codec, quality] = AUDIO_FMT_MAP[selectedFormat] ?? ["mp3", "0"];
+        let preferredQuality = quality;
+        if (selectedAudioQuality === "320 kbps") preferredQuality = "320";
+        else if (selectedAudioQuality === "256 kbps") preferredQuality = "256";
+        else if (selectedAudioQuality === "192 kbps") preferredQuality = "192";
+        else if (selectedAudioQuality === "128 kbps") preferredQuality = "128";
+        else if (selectedAudioQuality === "Best Available") preferredQuality = "0";
+
+        dlOptions = {
+          format: `Audio (${selectedFormat})`,
+          quality: selectedAudioQuality,
+          audio_codec: codec,
+          audio_quality: preferredQuality
+        };
+      }
+
+      const selectedTracks = [...selectedIndices].sort((a, b) => a - b).map(i => playlistTracks[i]).filter(t => t !== null && !t.unavailable);
+      batchProgress = { completed: 0, total: selectedTracks.length, succeeded: 0, failed: 0 };
+      
       const body = {
         tracks: selectedTracks,
-        options: { format: `Audio (${selectedFormat})`, quality: "Best Available", audio_codec: codec, audio_quality: quality },
+        options: dlOptions,
         playlist_title: playlistTitle,
       };
       const res = await fetch(`${API_BASE}/download/playlist`, {
@@ -2371,14 +2405,14 @@
             <div class="meta-header">
               <h2 class="track-title">{playlistTitle}</h2>
             </div>
-            <p class="track-artist">{playlistOwner} • {playlistTracks.length} tracks{#if playlistYear} • {playlistYear}{/if}</p>
+            <p class="track-artist">{playlistOwner} • {visibleTracks.length} items{#if playlistYear} • {playlistYear}{/if}</p>
             <div class="divider"></div>
             <div class="playlist-controls">
               <button class="select-toggle-btn" onclick={toggleAll}>{allSelected ? "Deselect All" : "Select All"}</button>
               <span class="selected-count">{selectedIndices.size} selected</span>
             </div>
             <div class="track-list">
-              {#each playlistTracks as t, i}
+              {#each visibleTracks as { track: t, originalIndex: i }, renderIdx}
                 {#if t}
                 <button class="track-row" class:selected={selectedIndices.has(i)} onclick={() => toggleTrack(i)}>
                   <span class="track-check-wrapper">
@@ -2390,7 +2424,7 @@
                       {/if}
                     </span>
                   </span>
-                  <span class="track-num">{i + 1}</span>
+                  <span class="track-num">{renderIdx + 1}</span>
                   {#if t.cover_url}<img class="track-thumb" src={t.cover_url} alt="" />{:else}<span class="track-thumb-placeholder">♪</span>{/if}
                   <div class="track-info">
                     <span class="track-row-title">{t.title}</span>
@@ -2400,7 +2434,7 @@
                 </button>
                 {:else}
                 <div class="track-row loading-row">
-                  <span class="track-num">{i + 1}</span>
+                  <span class="track-num">{renderIdx + 1}</span>
                   <span class="track-thumb-placeholder">⟳</span>
                   <div class="track-info"><span class="track-row-title muted">Loading...</span></div>
                 </div>
@@ -2421,25 +2455,63 @@
                 <p class="status-label" class:error={downloadSuccess === false}>{statusText}</p>
                 {#if isDownloading}<span class="progress-percent">{Math.round(progress * 100)}%</span>{/if}
               </div>
-              <div class="dl-btn-group">
-                <div class="custom-dropdown-container">
-                  <button class="format-select" class:open={activeDropdown === 'format_3'} style="--rotation: {menuRotations['format_3'] || 0}deg" disabled={isDownloading} onclick={(e) => { e.stopPropagation(); activeDropdown = activeDropdown === 'format_3' ? null : 'format_3'; }}>
-                    {selectedFormat}
-                  </button>
-                  {#if activeDropdown === 'format_3'}
-                    <div class="custom-dropdown-menu" transition:fly={{ y: 12, duration: 400, easing: cubicOut }}>
-                      {#each Object.keys(AUDIO_FMT_MAP) as fmt}
-                        <button class="custom-dropdown-item" onclick={() => { selectedFormat = fmt; activeDropdown = null; }}>
-                          {fmt}
-                        </button>
-                      {/each}
-                    </div>
-                  {/if}
+              <div class="yt-controls">
+                <div class="yt-format-row">
+                  <div class="format-slider" style="transform: translateX({selectedDownloadType === 'video' ? 'calc(100% + 3px)' : '0%'})"></div>
+                  <button
+                    type="button"
+                    class="format-tab"
+                    class:active={selectedDownloadType === "audio"}
+                    onclick={() => { selectedDownloadType = "audio"; }}
+                    disabled={isDownloading}
+                  >Audio</button>
+                  <button
+                    type="button"
+                    class="format-tab"
+                    class:active={selectedDownloadType === "video"}
+                    onclick={() => { selectedDownloadType = "video"; }}
+                    disabled={isDownloading}
+                  >Video</button>
                 </div>
-                <button class="dl-btn" onclick={startBatchDownload} disabled={isDownloading || selectedIndices.size === 0} class:downloading={isDownloading}>
-                  <span class="btn-text">{isDownloading ? `Downloading ${batchProgress.completed + 1 > batchProgress.total ? batchProgress.total : batchProgress.completed + 1}/${batchProgress.total} songs...` : `Download ${selectedIndices.size} Track${selectedIndices.size !== 1 ? 's' : ''}`}</span>
-                  <div class="btn-glow"></div>
-                </button>
+                
+                <div class="dl-btn-group">
+                  <div class="custom-dropdown-container format-collapse" class:collapsed={selectedDownloadType !== "audio"}>
+                    <button class="format-select" class:open={activeDropdown === 'format_3'} style="--rotation: {menuRotations['format_3'] || 0}deg" disabled={isDownloading || selectedDownloadType !== "audio"} onclick={(e) => { e.stopPropagation(); activeDropdown = activeDropdown === 'format_3' ? null : 'format_3'; }}>
+                      {selectedFormat}
+                    </button>
+                    {#if activeDropdown === 'format_3'}
+                      <div class="custom-dropdown-menu" transition:fly={{ y: 12, duration: 400, easing: cubicOut }}>
+                        {#each Object.keys(AUDIO_FMT_MAP) as fmt}
+                          <button class="custom-dropdown-item" onclick={() => { selectedFormat = fmt; activeDropdown = null; }}>
+                            {fmt}
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                  <div class="custom-dropdown-container">
+                    <button class="format-select" class:open={activeDropdown === 'quality_3'} style="--rotation: {menuRotations['quality_3'] || 0}deg" disabled={isDownloading} onclick={(e) => { e.stopPropagation(); activeDropdown = activeDropdown === 'quality_3' ? null : 'quality_3'; }}>
+                      {#key selectedDownloadType}
+                        <span class="quality-label-text" in:fade={{ duration: 150 }}>
+                          {selectedDownloadType === "audio" ? selectedAudioQuality : selectedVideoQuality}
+                        </span>
+                      {/key}
+                    </button>
+                    {#if activeDropdown === 'quality_3'}
+                      <div class="custom-dropdown-menu" transition:fly={{ y: 12, duration: 400, easing: cubicOut }}>
+                        {#each (selectedDownloadType === "audio" ? AUDIO_QUALITY_OPTIONS : VIDEO_QUALITY_OPTIONS) as q}
+                          <button class="custom-dropdown-item" onclick={() => { if (selectedDownloadType === "audio") { selectedAudioQuality = q; } else { selectedVideoQuality = q; } activeDropdown = null; }}>
+                            {q}
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                  <button class="dl-btn" onclick={startBatchDownload} disabled={isDownloading || selectedIndices.size === 0} class:downloading={isDownloading}>
+                    <span class="btn-text">{isDownloading ? `Downloading ${batchProgress.completed + 1 > batchProgress.total ? batchProgress.total : batchProgress.completed + 1}/${batchProgress.total} items...` : `Download ${selectedIndices.size} Item${selectedIndices.size !== 1 ? 's' : ''}`}</span>
+                    <div class="btn-glow"></div>
+                  </button>
+                </div>
               </div>
             </div>
           {/if}

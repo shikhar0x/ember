@@ -30,6 +30,8 @@ class VideoItem:
     thumbnail_url: Optional[str] = None
     source: str = "youtube"                                                
     media_type: str = "video"
+    unavailable: bool = False
+    year: Optional[str] = None
 
 
 @dataclass

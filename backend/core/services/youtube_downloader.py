@@ -9,6 +9,8 @@ Completely UI-agnostic. Emits structured event payloads.
 from __future__ import annotations
 
 import os
+import re as _re
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -31,6 +33,28 @@ _CODEC_EXT: dict[str, str] = {
     "wav":    "wav",
 }
 
+_PLAYLIST_PARAMS = {"list", "start_radio", "index"}
+
+
+def _strip_playlist_params(url: str | None) -> str | None:
+    """Remove playlist / radio-mix query params from a YouTube URL.
+
+    This ensures yt-dlp treats the URL as a single-video download even when
+    the user copies a link from a playlist or radio mix (e.g.
+    ``?v=xxx&list=RDxxx&start_radio=1``).
+    Non-YouTube URLs are returned unchanged.
+    """
+    if not url:
+        return url
+    parsed = urlparse(url)
+    if not _re.search(r"youtube\.com|youtu\.be", parsed.netloc):
+        return url
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    if "v" not in qs:
+        return url              # safety: don't touch non-watch URLs
+    cleaned_qs = {k: v for k, v in qs.items() if k not in _PLAYLIST_PARAMS}
+    return urlunparse(parsed._replace(query=urlencode(cleaned_qs, doseq=True)))
+
 
 def download_generic(
     data: dict | Track,
@@ -49,6 +73,9 @@ def download_generic(
         track_obj = data
         url = getattr(track_obj, "spotify_url", None) or getattr(track_obj, "url", None)
         title = getattr(track_obj, "title", "audio")
+
+    # Strip playlist / radio-mix params so yt-dlp downloads only the single video
+    url = _strip_playlist_params(url)
 
     fmt  = options.get("format", "Audio (MP3)")
     qual = options.get("quality", "Best Available")
@@ -70,7 +97,7 @@ def download_generic(
         cookie_file = None
 
     from core.utils import get_ffmpeg_details
-    ffmpeg_exe, ffmpeg_location = get_ffmpeg_details()
+    ffmpeg_exe, ffmpeg_location = get_ffmpeg_details(download_callback=callback)
 
     import threading
     prog_lock = threading.Lock()
@@ -124,6 +151,7 @@ def download_generic(
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
+                "noplaylist": True,
                 "outtmpl": out_tpl,
                 "keepvideo": False,
                 "cookiefile": cookie_file,
@@ -178,6 +206,7 @@ def download_generic(
                 opts = {
                     "quiet": True,
                     "no_warnings": True,
+                    "noplaylist": True,
                     "outtmpl": tpl,
                     "keepvideo": True,
                     "cookiefile": cookie_file,
@@ -204,8 +233,8 @@ def download_generic(
                 raise TaskCancelledException("Task was cancelled")
             emit(callback, progress_event(1.0, "Merging streams..."))
 
-            vid_files = glob.glob(str(dest / f"{temp_stem}.video.*"))
-            aud_files = glob.glob(str(dest / f"{temp_stem}.audio.*"))
+            vid_files = glob.glob(glob.escape(str(dest / f"{temp_stem}.video")) + ".*")
+            aud_files = glob.glob(glob.escape(str(dest / f"{temp_stem}.audio")) + ".*")
 
             if not vid_files or not aud_files:
                 raise Exception("Failed to locate downloaded streams for merging")
@@ -261,13 +290,13 @@ def download_generic(
                 os.remove(str(final_path))
             except OSError:
                 pass
-        for pattern in (f"{safe_title}*", f"{temp_stem}*"):
-            for p in dest.glob(pattern):
-                try:
-                    if p.is_file():
+        for prefix in (safe_title, temp_stem):
+            for p in dest.iterdir():
+                if p.is_file() and p.name.startswith(prefix):
+                    try:
                         os.remove(str(p))
-                except OSError:
-                    pass
+                    except OSError:
+                        pass
         raise
     except Exception as e:
         print(f"[YoutubeDL] generic download error: {e}")

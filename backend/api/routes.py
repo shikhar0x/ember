@@ -571,6 +571,36 @@ def inspect_url(url: str):
 
         token = _tm.get_headers()
 
+        def resolve_youtube_video(video_url):
+            import yt_dlp
+            try:
+                with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    if info:
+                        uploader = info.get('uploader') or info.get('channel')
+                        title = info.get('title')
+                        duration = info.get('duration')
+                        thumb = info.get('thumbnail')
+                        if not thumb and info.get('thumbnails'):
+                            thumb = info['thumbnails'][-1].get('url')
+                        
+                        year = None
+                        if info.get('release_year'):
+                            year = str(info['release_year'])
+                        elif info.get('upload_date') and len(info['upload_date']) >= 4:
+                            year = info['upload_date'][:4]
+
+                        return {
+                            "artists": [uploader] if uploader else ["Unknown"],
+                            "title": title,
+                            "duration": duration,
+                            "cover_url": thumb,
+                            "year": year,
+                        }
+            except Exception:
+                pass
+            return None
+
         def _raw_to_track(t, idx, parent_cover=None):
             return {
                 "title": t.get("title", "Unknown"),
@@ -912,18 +942,25 @@ def inspect_url(url: str):
                         "meta": {
                             "type": "playlist",
                             "title": getattr(t0, "parent_name", None) or getattr(t0, "album", None) or "Playlist",
-                            "owner": getattr(t0, "parent_owner", None) or "Spotify",
+                            "owner": getattr(t0, "parent_owner", None) or getattr(t0, "uploader", None) or "Unknown",
                             "cover_url": getattr(t0, "parent_cover", None) or getattr(t0, "cover_url", None),
                             "total_tracks": len(items),
                         }
                     }
                     yield f"data: {json.dumps(header)}\n\n"
 
+                    youtube_futures = {}
+
+                    print(f"[Ember] Generic parser resolved {len(items)} items. Queueing youtube resolutions...")
+
                     for i, t in enumerate(items):
                         uploader = getattr(t, "uploader", None)
                         artists = getattr(t, "artists", [])
                         if not artists and uploader:
                             artists = [uploader]
+
+                        video_url = getattr(t, "url", None)
+                        is_youtube = video_url and ("youtube.com" in video_url or "youtu.be" in video_url)
 
                         track_item = {
                             "title": getattr(t, "title", "Unknown"),
@@ -934,13 +971,33 @@ def inspect_url(url: str):
                             "spotify_url": getattr(t, "spotify_url", getattr(t, "url", None)),
                             "isrc": getattr(t, "isrc", None),
                             "year": getattr(t, "year", None),
-                            "source": getattr(t, "source", "spotify"),
+                            "source": "web" if is_youtube else getattr(t, "source", "spotify"),
                             "media_type": getattr(t, "media_type", "audio"),
                             "track_number": getattr(t, "track_number", None),
                             "total_tracks": getattr(t, "total_tracks", 0),
                             "genre": getattr(t, "genre", None),
+                            "unavailable": getattr(t, "unavailable", False),
                         }
                         yield f"data: {json.dumps({'type': 'track_item', 'index': i, 'track': track_item})}\n\n"
+
+                        if is_youtube:
+                            fut = executor.submit(resolve_youtube_video, video_url)
+                            youtube_futures[fut] = i
+
+                    if youtube_futures:
+                        print(f"[Ember] Waiting for {len(youtube_futures)} YouTube video details in background...")
+                        for fut in concurrent.futures.as_completed(youtube_futures):
+                            try:
+                                idx = youtube_futures[fut]
+                                res = fut.result()
+                                print(f"[Ember] Resolved YouTube video {idx} result: {res}")
+                                if res:
+                                    yield f"data: {json.dumps({'type': 'update', 'index': idx, 'updates': res})}\n\n"
+                                else:
+                                    yield f"data: {json.dumps({'type': 'update', 'index': idx, 'updates': {'unavailable': True}})}\n\n"
+                            except Exception as e:
+                                print(f"[Ember] Failed resolving YouTube video details: {e}")
+                                yield f"data: {json.dumps({'type': 'update', 'index': idx, 'updates': {'unavailable': True}})}\n\n"
 
             for fut in concurrent.futures.as_completed(futures):
                 try:

@@ -92,6 +92,13 @@ class FFmpegManager:
             return self._progress.ffmpeg_path
 
     @property
+    def ffprobe_path(self) -> Optional[str]:
+        with self._state_lock:
+            if self._progress.ffmpeg_path:
+                return str(self._bin_dir / self._ffprobe_name())
+            return None
+
+    @property
     def error(self) -> Optional[str]:
         with self._state_lock:
             return self._progress.error
@@ -377,23 +384,18 @@ class FFmpegManager:
 
     def _check_existing_ffmpeg(self) -> bool:
         """Check if FFmpeg is already installed and valid."""
-        ffmpeg_path = self._bin_dir / self._ffmpeg_name()
-        if not ffmpeg_path.exists():
-            return False
         return self._validate_ffmpeg()
 
     def _validate_ffmpeg(self) -> bool:
-        """Run `ffmpeg -version` to validate integrity. Returns True if valid."""
+        """Run `ffmpeg -version` and confirm ffprobe exists to validate integrity."""
         ffmpeg_path = self._bin_dir / self._ffmpeg_name()
-        if not ffmpeg_path.exists():
+        ffprobe_path = self._bin_dir / self._ffprobe_name()
+        if not ffmpeg_path.exists() or not ffprobe_path.exists():
             return False
-
         try:
             result = subprocess.run(
                 [str(ffmpeg_path), "-version"],
-                capture_output=True,
-                text=True,
-                timeout=5,
+                capture_output=True, text=True, timeout=5,
             )
             return result.returncode == 0 and "ffmpeg version" in result.stdout.lower()
         except Exception:

@@ -260,6 +260,16 @@ class InputParser:
             result = InputParser._parse_reddit_image(url)
             if result: return result
 
+        # For video-in-playlist URLs (e.g. ?v=xxx&list=RDxxx&start_radio=1),
+        # strip playlist params so yt-dlp resolves only the single video.
+        # Pure playlist URLs (e.g. /playlist?list=PLxxx) are left intact.
+        from core.services.youtube_downloader import _strip_playlist_params
+        from urllib.parse import urlparse, parse_qs
+        parsed_url = urlparse(url)
+        is_single_video = "v" in parse_qs(parsed_url.query)
+        if is_single_video:
+            url = _strip_playlist_params(url) or url
+
                                                                            
         from core.services.cookie_manager import get_cookie_file
         import os
@@ -270,8 +280,15 @@ class InputParser:
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
+            'noplaylist': is_single_video,
             'cookiefile': ghost_cookie_file if ghost_cookie_file and os.path.exists(ghost_cookie_file) else None,
         }
+        # For playlist URLs, use extract_flat so yt-dlp scrapes only the
+        # playlist page (one fast request) instead of fully processing every
+        # video individually (N slow requests).
+        if not is_single_video:
+            ydl_opts['extract_flat'] = 'in_playlist'
+
         if os.name == "nt":
             ydl_opts["extractor_args"] = {
                 "youtube": {
@@ -289,17 +306,61 @@ class InputParser:
         if info:
             entries = info.get('entries')
             if entries:
-                                                            
-                entry = entries[0]
-                return [VideoItem(
-                    title=entry.get('title') or info.get('title') or 'Unknown',
-                    uploader=entry.get('uploader') or 'Unknown',
-                    url=entry.get('webpage_url') or url,
-                    duration=entry.get('duration') or 0,
-                    thumbnail_url=entry.get('thumbnail'),
-                    source="web",
-                    media_type="video",
-                )]
+                # entries may be a lazy generator; materialise it
+                entries = list(entries)
+                items = []
+                for entry in entries:
+                    # With extract_flat, entries have 'id' / 'url' but not
+                    # always 'webpage_url'.  Build a proper watch URL.
+                    vid_id = entry.get('id') or ''
+                    entry_url = (
+                        entry.get('webpage_url')
+                        or entry.get('url')
+                        or (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else url)
+                    )
+                    # Thumbnail: flat entries use 'thumbnails' list
+                    thumb = entry.get('thumbnail')
+                    if not thumb and entry.get('thumbnails'):
+                        thumb = entry['thumbnails'][-1].get('url')
+
+                    entry_title = entry.get('title')
+                    is_flat_unavailable = False
+                    if entry_title:
+                        title_lower = entry_title.lower()
+                        if "private video" in title_lower or "deleted video" in title_lower:
+                            is_flat_unavailable = True
+                    else:
+                        is_flat_unavailable = True
+
+                    entry_year = None
+                    if entry.get('release_year'):
+                        entry_year = str(entry['release_year'])
+                    elif entry.get('upload_date') and len(entry['upload_date']) >= 4:
+                        entry_year = entry['upload_date'][:4]
+
+                    items.append(VideoItem(
+                        title=entry_title or info.get('title') or 'Unknown',
+                        uploader=entry.get('uploader') or entry.get('channel') or entry.get('playlist_uploader') or entry.get('playlist_channel') or 'Unknown',
+                        url=entry_url,
+                        duration=entry.get('duration') or 0,
+                        thumbnail_url=thumb,
+                        source="web",
+                        media_type="video",
+                        unavailable=is_flat_unavailable,
+                        year=entry_year,
+                    ))
+
+                # Attach playlist-level metadata to the first item so the
+                # route can use it for the playlist header.
+                if items:
+                    pl_thumb = info.get('thumbnail')
+                    if not pl_thumb and info.get('thumbnails'):
+                        pl_thumb = info['thumbnails'][-1].get('url')
+                    items[0].parent_name = info.get('title') or info.get('playlist_title') or 'YouTube Playlist'
+                    items[0].parent_owner = info.get('uploader') or info.get('channel') or info.get('playlist_uploader') or info.get('playlist_channel') or 'YouTube'
+                    items[0].parent_cover = pl_thumb
+
+                return items
             else:
                 return [VideoItem(
                     title=info.get('title') or 'Unknown',

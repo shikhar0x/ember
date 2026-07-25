@@ -27,7 +27,7 @@ def _extract_youtube_video_id(url: str) -> Optional[str]:
 from core.pipeline import resolve
 from core.fetcher import fetch_audio
 from core.tagger import tag_audio
-from core.utils import sanitize_filename as core_sanitize, open_folder
+from core.utils import sanitize_filename as core_sanitize, open_folder, get_ffmpeg_details
 from core.http_helper import get_bytes
 from core.events import emit, progress_event, complete_event, error_event, TaskCancelledException
 
@@ -62,6 +62,8 @@ def download_track(
     try:
         if callback and getattr(callback, "is_cancelled", lambda: False)():
             raise TaskCancelledException("Task was cancelled")
+
+        get_ffmpeg_details(download_callback=callback)
                           
         if not getattr(track, "_enriched", False):
             from core.enrich import enrich_tracks, apply_enrichment_updates
@@ -185,6 +187,8 @@ def download_track_manual(
     try:
         if callback and getattr(callback, "is_cancelled", lambda: False)():
             raise TaskCancelledException("Task was cancelled")
+
+        get_ffmpeg_details(download_callback=callback)
 
         emit(callback, progress_event(0.05, "Downloading audio..."))
 

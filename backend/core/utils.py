@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 def sanitize_filename(name: str) -> str:
     """
@@ -47,70 +48,21 @@ def normalize_artist(artists: list) -> str:
     return main.strip().lower()
 
 
-def ensure_ffmpeg() -> tuple[str, str]:
-    import os
-    import sys
-    import platform
-    import urllib.request
-    import zipfile
-    import shutil
-    
-    bin_dir = os.path.abspath(os.path.join(os.path.expanduser("~"), ".ember", "bin"))
-    
-    ext = ".exe" if os.name == "nt" else ""
-    ffmpeg_exe = os.path.join(bin_dir, f"ffmpeg{ext}")
-    ffprobe_exe = os.path.join(bin_dir, f"ffprobe{ext}")
-    
-    if os.path.exists(ffmpeg_exe) and os.path.exists(ffprobe_exe):
-        return ffmpeg_exe, bin_dir
-        
-    print(f"[Ember] FFmpeg/FFprobe missing. Creating directory: {bin_dir}")
-    os.makedirs(bin_dir, exist_ok=True)
-    
-    system = platform.system().lower()
-    
-    urls = {}
-    if system == "windows":
-        urls["ffmpeg"] = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffmpeg-4.4.1-win-64.zip"
-        urls["ffprobe"] = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffprobe-4.4.1-win-64.zip"
-    elif system == "darwin":
-        urls["ffmpeg"] = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffmpeg-4.4.1-osx-64.zip"
-        urls["ffprobe"] = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffprobe-4.4.1-osx-64.zip"
-    elif system == "linux":
-        urls["ffmpeg"] = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffmpeg-4.4.1-linux-64.zip"
-        urls["ffprobe"] = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffprobe-4.4.1-linux-64.zip"
-    else:
-        print(f"[Ember] Unsupported OS for automated FFmpeg download: {system}")
-        return ffmpeg_exe, bin_dir
+def get_ffmpeg_details(timeout: float = 120.0, download_callback=None) -> tuple[str, str]:
+    from core.ffmpeg_manager import get_ffmpeg_manager
+    from core.events import emit, progress_event
 
-    for name, url in urls.items():
-        zip_path = os.path.join(bin_dir, f"{name}.zip")
-        print(f"[Ember] Downloading {name} from {url}...")
-        try:
-            urllib.request.urlretrieve(url, zip_path)
-            print(f"[Ember] Extracting {name}...")
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(bin_dir)
-            os.remove(zip_path)
-            
-            if system != "windows":
-                exec_path = os.path.join(bin_dir, name)
-                if os.path.exists(exec_path):
-                    os.chmod(exec_path, 0o755)
-        except Exception as e:
-            print(f"[Ember] Error setting up {name}: {e}")
-            
-    return ffmpeg_exe, bin_dir
+    mgr = get_ffmpeg_manager()
+    if not mgr.is_ready:
+        emit(download_callback, progress_event(0.0, "Finishing audio engine setup..."))
+        mgr.start_acquisition()  # no-op if already running
+        if not mgr.wait_until_ready(timeout=timeout):
+            raise RuntimeError(f"FFmpeg not ready after {timeout}s: {mgr.message or mgr.error}")
 
-
-def get_ffmpeg_details() -> tuple[str, str]:
-    """Resolve FFmpeg details, automatically downloading at runtime if missing.
-    Never falls back to system PATH or other system-installed instances.
-    
-    Returns:
-        tuple: (ffmpeg_executable_path, ffmpeg_directory_path)
-    """
-    return ensure_ffmpeg()
+    ffmpeg_path = mgr.ffmpeg_path
+    if not ffmpeg_path:
+        raise RuntimeError("FFmpegManager reports ready but ffmpeg_path is unset")
+    return ffmpeg_path, str(Path(ffmpeg_path).parent)
 
 
 def open_folder(path: "Path" | str) -> None:
