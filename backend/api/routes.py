@@ -78,6 +78,24 @@ def _track_from_schema(s) -> Track:
     return t
 
 
+@router.post("/open_download_dir")
+def open_download_dir():
+    import os
+    import subprocess
+    import sys
+    try:
+        path = str(_controller.download_dir)
+        if sys.platform == "win32":
+            os.startfile(path)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 def _submit(submit_fn, *args, **kwargs) -> TaskResponse:
     """
     Create a task_id + callback before submitting work, avoiding

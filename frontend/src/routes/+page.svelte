@@ -600,7 +600,10 @@
     };
   });
 
+  let isPolling = false;
   function startStatusPolling() {
+    if (isPolling) return;
+    isPolling = true;
     async function poll() {
       try {
         const res = await fetch(`${API_BASE}/status`);
@@ -629,6 +632,7 @@
         progress = data.progress ?? 0;
 
         if (data.ready) {
+          isPolling = false;
           try {
             const fetchMe = async () => {
               try {
@@ -1372,6 +1376,18 @@
     startStatusPolling();
   }
 
+  async function openDownloadsFolder() {
+    try {
+      const res = await fetch(`${API_BASE}/open_download_dir`, { method: "POST" });
+      if (!res.ok) {
+        showToast("Failed to open downloads folder", "error");
+      }
+    } catch (e) {
+      console.error("Failed to open downloads folder:", e);
+      showToast("Failed to open downloads folder", "error");
+    }
+  }
+
   function handlePairingUrlChange(newUrl: string) {
     if (previewEs) {
       previewEs.close();
@@ -1618,6 +1634,17 @@
                   <div class="opt-text">
                     <span class="opt-title">About</span>
                     <span class="opt-desc">App details and information</span>
+                  </div>
+                  <svg class="opt-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+
+                <button class="profile-opt-btn" onclick={openDownloadsFolder}>
+                  <svg class="opt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <div class="opt-text">
+                    <span class="opt-title">Open Downloads</span>
+                    <span class="opt-desc">Open the folder in File Explorer</span>
                   </div>
                   <svg class="opt-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                 </button>

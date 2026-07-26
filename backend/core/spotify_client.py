@@ -404,47 +404,48 @@ class TokenManager:
         ws = None
         bearer = None
 
-        try:
-            print("[TokenManager] Attempting silent harvest in headless mode...")
-            self._warmup_message = "Connecting to Spotify..."
-            self._needs_login = False
-            proc = launch_browser(headless=True, port=PORT_HEADLESS, url="https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b")
-            ws_url = None
-            start = time.time()
-            while time.time() - start < 7:
-                ws_url = get_page_ws_url(PORT_HEADLESS)
+        if sys.platform != "win32":
+            try:
+                print("[TokenManager] Attempting silent harvest in headless mode...")
+                self._warmup_message = "Connecting to Spotify..."
+                self._needs_login = False
+                proc = launch_browser(headless=True, port=PORT_HEADLESS, url="https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b")
+                ws_url = None
+                start = time.time()
+                while time.time() - start < 7:
+                    ws_url = get_page_ws_url(PORT_HEADLESS)
+                    if ws_url:
+                        break
+                    time.sleep(0.4)
                 if ws_url:
-                    break
-                time.sleep(0.4)
-            if ws_url:
-                ws = websocket.create_connection(ws_url, timeout=4.0)
-                ws.send(json.dumps({"id": 1, "method": "Network.enable", "params": {}}))
-                ws.send(json.dumps({"id": 2, "method": "Page.enable", "params": {}}))
-                ws.send(json.dumps({"id": 3, "method": "Page.reload", "params": {}}))
+                    ws = websocket.create_connection(ws_url, timeout=4.0)
+                    ws.send(json.dumps({"id": 1, "method": "Network.enable", "params": {}}))
+                    ws.send(json.dumps({"id": 2, "method": "Page.enable", "params": {}}))
+                    ws.send(json.dumps({"id": 3, "method": "Page.reload", "params": {}}))
 
-                listen_start = time.time()
-                while time.time() - listen_start < 7 and not bearer:
-                    try:
-                        ws.settimeout(0.35)
-                        msg = json.loads(ws.recv())
-                        method = msg.get("method")
-                        if method == "Network.webSocketCreated":
-                            url = msg.get("params", {}).get("url", "")
-                            if "access_token=" in url:
-                                token = url.split("access_token=")[1].split("&")[0]
-                                if token:
-                                    bearer = f"Bearer {token}"
+                    listen_start = time.time()
+                    while time.time() - listen_start < 7 and not bearer:
+                        try:
+                            ws.settimeout(0.35)
+                            msg = json.loads(ws.recv())
+                            method = msg.get("method")
+                            if method == "Network.webSocketCreated":
+                                url = msg.get("params", {}).get("url", "")
+                                if "access_token=" in url:
+                                    token = url.split("access_token=")[1].split("&")[0]
+                                    if token:
+                                        bearer = f"Bearer {token}"
+                                        break
+                            elif method in ("Network.requestWillBeSentExtraInfo", "Network.requestWillBeSent"):
+                                headers = msg.get("params", {}).get("headers", {}) or msg.get("params", {}).get("request", {}).get("headers", {})
+                                auth = headers.get("authorization") or headers.get("Authorization")
+                                if auth and "Bearer" in auth:
+                                    bearer = auth
                                     break
-                        elif method in ("Network.requestWillBeSentExtraInfo", "Network.requestWillBeSent"):
-                            headers = msg.get("params", {}).get("headers", {}) or msg.get("params", {}).get("request", {}).get("headers", {})
-                            auth = headers.get("authorization") or headers.get("Authorization")
-                            if auth and "Bearer" in auth:
-                                bearer = auth
-                                break
-                    except websocket.WebSocketTimeoutException:
-                        continue
-        except Exception as e:
-            print(f"[TokenManager] Headless harvest error: {e}")
+                        except websocket.WebSocketTimeoutException:
+                            continue
+            except Exception as e:
+                print(f"[TokenManager] Headless harvest error: {e}")
 
         if not bearer:
             if ws:
@@ -717,7 +718,7 @@ class TokenManager:
 
         self._warmup_message = "Almost ready..."
         self._bearer = bearer
-        self._expires_at = time.time() + 3300
+        self._expires_at = time.time() + 2592000
         self._client_token = ""
         self._client_token_expires_at = 0.0
 
