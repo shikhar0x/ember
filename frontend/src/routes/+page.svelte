@@ -1,9 +1,30 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { invoke } from '@tauri-apps/api/core';
+  import { invoke, isTauri } from '@tauri-apps/api/core';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { fade, fly, scale, crossfade, slide } from 'svelte/transition';
   import { quintOut, cubicOut, backOut } from 'svelte/easing';
+
+  async function minimizeWindow() {
+    if (isTauri()) {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().minimize();
+    }
+  }
+
+  async function toggleMaximizeWindow() {
+    if (isTauri()) {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().toggleMaximize();
+    }
+  }
+
+  async function closeWindow() {
+    if (isTauri()) {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().close();
+    }
+  }
 
   const openExternalUrl = (link: string) => {
     openUrl(link);
@@ -311,11 +332,13 @@
     source: string;
     media_type: string;
     local_file_path: string | null;
+    unavailable?: boolean;
   };
 
   let track: TrackInfo | null = null;
   let transitioning = false;
   let isTransitioningToHome = false;
+  let isMaximized = false;
 
   let isPlaylist = false;
   let playlistTitle = "";
@@ -493,6 +516,16 @@
   onMount(() => {
     const preventContextMenu = (e: MouseEvent) => e.preventDefault();
     window.addEventListener('contextmenu', preventContextMenu);
+
+    if (isTauri()) {
+      import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+        const appWindow = getCurrentWindow();
+        isMaximized = await appWindow.isMaximized();
+        await appWindow.onResized(async () => {
+          isMaximized = await appWindow.isMaximized();
+        });
+      });
+    }
 
     const updateTime = () => {
       const now = new Date();
@@ -1591,7 +1624,34 @@
         {/if}
         <span class="profile-name">{(userProfile.display_name || 'User').split(' ')[0]}</span>
       </button>
-      
+
+      <div class="profile-divider"></div>
+      <div class="window-controls-inline">
+        <button class="win-btn" onclick={minimizeWindow} aria-label="Minimize">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+        <button class="win-btn" onclick={toggleMaximizeWindow} aria-label={isMaximized ? "Restore Down" : "Maximize"}>
+          {#if isMaximized}
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 8h12v12H4z" />
+              <path d="M8 8V4h12v12h-4" />
+            </svg>
+          {:else}
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+            </svg>
+          {/if}
+        </button>
+        <button class="win-btn close" onclick={closeWindow} aria-label="Close">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="6" y1="6" x2="18" y2="18" />
+            <line x1="18" y1="6" x2="6" y2="18" />
+          </svg>
+        </button>
+      </div>
+
       {#if isProfileMenuOpen}
         <div class="profile-dropdown" role="presentation" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} in:fly={{ y: -12, duration: 300, easing: cubicOut }} out:fly={{ y: -12, duration: 180, easing: cubicOut }}>
           {#if activeProfileSubMenu === 'main'}
@@ -2674,7 +2734,7 @@
   }
   .content-wrapper.wide {
     position: absolute;
-    inset: 3rem 2.4rem 2rem 2rem;
+    inset: calc(3rem + var(--titlebar-offset, 0px)) 2.4rem 2rem 2rem;
     max-width: none;
     width: auto;
     padding-top: 3.5rem;
@@ -2685,16 +2745,19 @@
   header { text-align: center; margin-bottom: 2.5rem; transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
   header.compact {
     position: fixed;
-    top: calc(2.8rem + 7px);
+    top: calc(2.8rem + 7px + var(--titlebar-offset, 0px));
     transform: translateY(-50%);
     left: 14rem;
-    right: 20.5rem;
+    right: 28rem;
+    max-width: calc(100vw - 43rem);
+    min-width: 0;
     margin: 0;
     padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 99;
+    overflow: hidden;
     transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
   }
   h1 {
@@ -2715,7 +2778,9 @@
   .top-bar-input {
     max-width: 580px;
     width: 100%;
+    min-width: 0;
     margin: 0 auto;
+    overflow: hidden;
     transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
   }
   .top-bar-input.exit {
@@ -2811,6 +2876,10 @@
   input {
     flex: 1;
     width: 100%;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     background: linear-gradient(to bottom, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
     backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
     border: 1px solid rgba(255,255,255,0.06);
@@ -3827,15 +3896,15 @@
 
   .clock-widget {
     position: fixed;
-    top: 2.8rem;
+    top: calc(2.8rem + var(--titlebar-offset, 0px));
     transform: translateY(-50%);
     left: 2rem;
-    z-index: 100;
+    z-index: 1000;
     display: flex;
     align-items: center;
-    gap: 1.1rem;
+    gap: 0.6rem;
     background: rgba(255,255,255,0.02);
-    padding: 0.45rem 1.3rem;
+    padding: 0.25rem 0.8rem;
     border-radius: 100px;
     border: 1px solid rgba(255,255,255,0.08);
     backdrop-filter: blur(24px);
@@ -3855,35 +3924,35 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    line-height: 1.1;
+    line-height: 1.05;
   }
   .clock-month {
-    font-size: 1.1rem;
+    font-size: 0.7rem;
     font-weight: 700;
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
     color: #e11d2e;
   }
   .clock-day {
-    font-size: 2.1rem;
+    font-size: 1.25rem;
     font-weight: 600;
   }
   .clock-divider {
     width: 1px;
-    height: 42px;
+    height: 24px;
     background: rgba(255, 255, 255, 0.1);
   }
   .clock-time {
-    font-size: 1.35rem;
+    font-size: 0.95rem;
     font-weight: 300;
     letter-spacing: 0.5px;
   }
 
   .profile-widget {
     position: fixed;
-    top: 2.8rem;
+    top: calc(2.8rem + var(--titlebar-offset, 0px));
     transform: translateY(-50%);
     right: 2.4rem;
-    z-index: 100;
+    z-index: 1000;
     display: flex;
     align-items: center;
     background: rgba(255,255,255,0.02);
@@ -3904,21 +3973,53 @@
     height: 30px;
     background: rgba(255, 255, 255, 0.1);
     margin: 0 0.6rem;
+    flex-shrink: 0;
+  }
+  .window-controls-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding-right: 0.4rem;
+    flex-shrink: 0;
+  }
+  .win-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    outline: none;
+    padding: 0;
+  }
+  .win-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+  }
+  .win-btn.close:hover {
+    background: rgba(225, 29, 46, 0.85);
+    border-color: rgba(225, 29, 46, 1);
+    color: #ffffff;
   }
   .profile-btn {
     display: flex;
     align-items: center;
-    gap: 1.1rem;
+    gap: 0.8rem;
     background: transparent;
-    padding: 0.3rem 1.5rem 0.3rem 1.5rem;
+    padding: 0.3rem 0.8rem;
     border-radius: 100px;
     border: none;
     transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
     cursor: pointer;
     font-family: inherit;
     outline: none;
-    width: 100%;
-    max-width: 520px;
+    width: auto;
+    flex-shrink: 0;
     justify-content: flex-start;
     text-align: left;
   }
@@ -3931,17 +4032,18 @@
     transform: scale(0.98);
   }
   .profile-avatar {
-    width: 48px;
-    height: 48px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
     object-fit: cover;
   }
   .profile-name {
     color: #E2E4E9;
-    font-size: 1.35rem;
+    font-size: 1.1rem;
     font-weight: 500;
     text-align: left;
-    flex: 1;
+    white-space: nowrap;
+    flex: none;
   }
 
   .profile-dropdown {
@@ -5805,10 +5907,17 @@
 
 
 
+  @media (max-width: 1000px) {
+    header.compact {
+      left: 12rem;
+      right: 26rem;
+    }
+  }
+
   @media (max-width: 650px) {
     header.compact {
-      left: 11rem;
-      right: 11rem;
+      left: 10rem;
+      right: 18rem;
     }
   }
 

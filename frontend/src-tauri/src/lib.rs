@@ -263,6 +263,20 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![init_backend])
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.with_webview(|webview| {
+                        use webkit2gtk::WebViewExt;
+                        let webview_ptr = webview.inner();
+                        let bg = gdk::RGBA::new(0.0, 0.0, 0.0, 0.0);
+                        webview_ptr.set_background_color(&bg);
+                    });
+                }
+            }
+            Ok(())
+        })
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 stop_backend();
