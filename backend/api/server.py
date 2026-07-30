@@ -103,7 +103,7 @@ def create_app(
 
     _app = FastAPI(
         title="Ember API",
-        version="1.0.0",
+        version="1.1.0",
         docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,                                  

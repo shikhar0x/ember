@@ -1844,7 +1844,7 @@
               <div class="profile-about-content">
                 <div class="about-logo">Ember</div>
                 <div class="about-tagline">Yours, forever.</div>
-                <div class="about-version">v1.0.0</div>
+                <div class="about-version">v1.1.0</div>
                 <div class="about-info-grid">
                   <div class="about-developer-card">
                     <img class="about-avatar" src={GITHUB_AVATAR_URL} alt="Shikhar Upadhyay" />

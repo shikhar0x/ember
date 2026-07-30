@@ -718,7 +718,8 @@ class TokenManager:
 
         self._warmup_message = "Almost ready..."
         self._bearer = bearer
-        self._expires_at = time.time() + 2592000
+        # Spotify access tokens expire in 1 hour (3600 seconds). Use 3300 (55 mins) as a safe buffer.
+        self._expires_at = time.time() + 3300
         self._client_token = ""
         self._client_token_expires_at = 0.0
 
