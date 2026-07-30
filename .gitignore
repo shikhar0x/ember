@@ -33,3 +33,6 @@ node_modules/
 
 # OS files
 .DS_Store
+
+# IDE / Editor config
+.vscode/
