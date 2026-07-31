@@ -10,6 +10,53 @@
   let isTauriEnv = $state(false);
   let isMaximized = $state(false);
 
+  /** Tags and selectors that should NOT trigger window dragging */
+  const INTERACTIVE_TAGS = new Set([
+    'BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'A',
+    'IFRAME', 'VIDEO', 'AUDIO', 'CANVAS', 'LABEL',
+    'DETAILS', 'SUMMARY'
+  ]);
+
+  const INTERACTIVE_ROLES = new Set([
+    'button', 'link', 'textbox', 'slider', 'checkbox',
+    'radio', 'switch', 'tab', 'menuitem', 'option',
+    'combobox', 'spinbutton', 'scrollbar'
+  ]);
+
+  /** Check if an element or any ancestor up to the root is interactive */
+  function isInteractiveElement(el: HTMLElement | null): boolean {
+    while (el && el !== document.documentElement) {
+      // Check tag
+      if (INTERACTIVE_TAGS.has(el.tagName)) return true;
+
+      // Check ARIA role
+      const role = el.getAttribute('role');
+      if (role && INTERACTIVE_ROLES.has(role)) return true;
+
+      // Check contenteditable
+      if (el.isContentEditable) return true;
+
+      // Check resize borders/corners
+      if (el.classList.contains('resize-edge') || el.classList.contains('resize-corner')) return true;
+
+      // Check window control buttons
+      if (el.classList.contains('win-btn')) return true;
+
+      // Check elements that opt out of dragging
+      if (el.dataset.noDrag !== undefined) return true;
+
+      el = el.parentElement;
+    }
+    return false;
+  }
+
+  /** Check if the direct click target has an interactive cursor */
+  function hasInteractiveCursor(el: HTMLElement): boolean {
+    const style = getComputedStyle(el);
+    return style.cursor === 'pointer' || style.cursor === 'text' ||
+           style.cursor.includes('resize');
+  }
+
   $effect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.style.setProperty('--titlebar-offset', '0px');
@@ -26,12 +73,30 @@
         await appWindow.onResized(async () => {
           isMaximized = await appWindow.isMaximized();
         });
+
+        // Global mousedown handler for window dragging
+        document.addEventListener('mousedown', (e: MouseEvent) => {
+          // Only left mouse button
+          if (e.button !== 0) return;
+
+          const target = e.target as HTMLElement;
+          if (!target) return;
+
+          // Don't drag if clicking on an interactive element
+          if (isInteractiveElement(target)) return;
+
+          // Don't drag if the clicked element itself has an interactive cursor
+          if (hasInteractiveCursor(target)) return;
+
+          // Start dragging the window
+          appWindow.startDragging();
+        });
       });
     }
   });
 </script>
 
-<div data-tauri-drag-region class="app-root" class:is-floating={isTauriEnv && !isMaximized}>
+<div class="app-root" class:is-floating={isTauriEnv && !isMaximized}>
   {#if isTauriEnv && !isMaximized}
     <ResizeBorders />
   {/if}
