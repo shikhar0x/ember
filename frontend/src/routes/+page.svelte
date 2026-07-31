@@ -372,6 +372,9 @@
   $: loadedCount = playlistTracks.filter(t => t !== null && !t.unavailable).length;
   $: allSelected = selectedIndices.size === loadedCount && loadedCount > 0;
   $: isYoutubePlaylist = isPlaylist && (url.includes("youtube.com") && !url.includes("music.youtube.com"));
+  $: if (isPlaylist && !isYoutubePlaylist) {
+    selectedDownloadType = "audio";
+  }
   $: visibleTracks = playlistTracks.map((t, idx) => ({ track: t, originalIndex: idx })).filter(item => item.track === null || !item.track.unavailable);
   let isExpanding = false;
   let isDraggingOver = false;
@@ -2061,6 +2064,34 @@
   {/if}
 {/if}
 
+{#if appState !== "main" || !userProfile}
+  <div class="window-controls-standalone">
+    <button class="win-btn" onclick={minimizeWindow} aria-label="Minimize">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+    </button>
+    <button class="win-btn" onclick={toggleMaximizeWindow} aria-label={isMaximized ? "Restore Down" : "Maximize"}>
+      {#if isMaximized}
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 8h12v12H4z" />
+          <path d="M8 8V4h12v12h-4" />
+        </svg>
+      {:else}
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+        </svg>
+      {/if}
+    </button>
+    <button class="win-btn close" onclick={closeWindow} aria-label="Close">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <line x1="6" y1="6" x2="18" y2="18" />
+        <line x1="18" y1="6" x2="6" y2="18" />
+      </svg>
+    </button>
+  </div>
+{/if}
+
 <main class="container" class:light-theme={isLightTheme} style="--custom-bg: {customBgColor};">
   {#if customWallpaperUrl}
     <div class="custom-wallpaper-bg" style="opacity: {wallpaperOpacity / 100}; filter: blur({wallpaperBlur}px); background-image: url({customWallpaperUrl});" aria-hidden="true"></div>
@@ -2374,6 +2405,22 @@
                           </div>
                         {/if}
                       </div>
+                      <div class="custom-dropdown-container">
+                        <button class="format-select" class:open={activeDropdown === 'quality_1'} style="--rotation: {menuRotations['quality_1'] || 0}deg" disabled={isDownloading} onclick={(e) => { e.stopPropagation(); activeDropdown = activeDropdown === 'quality_1' ? null : 'quality_1'; }}>
+                          <span class="quality-label-text">
+                            {selectedAudioQuality}
+                          </span>
+                        </button>
+                        {#if activeDropdown === 'quality_1'}
+                          <div class="custom-dropdown-menu" transition:fly={{ y: 12, duration: 400, easing: cubicOut }}>
+                            {#each AUDIO_QUALITY_OPTIONS as q}
+                              <button class="custom-dropdown-item" onclick={() => { selectedAudioQuality = q; activeDropdown = null; }}>
+                                {q}
+                              </button>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
                       <div class="dl-btn-pair">
                         {#if track.source === 'spotify'}
                           <button class="dl-btn secondary-dl" onclick={() => startDownloadWithPairing(false)} disabled={isDownloading}>
@@ -2403,6 +2450,22 @@
                             {#each Object.keys(AUDIO_FMT_MAP) as fmt}
                               <button class="custom-dropdown-item" onclick={() => { selectedFormat = fmt; activeDropdown = null; }}>
                                 {fmt}
+                              </button>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                      <div class="custom-dropdown-container">
+                        <button class="format-select" class:open={activeDropdown === 'quality_1_alt'} style="--rotation: {menuRotations['quality_1_alt'] || 0}deg" disabled={isDownloading} onclick={(e) => { e.stopPropagation(); activeDropdown = activeDropdown === 'quality_1_alt' ? null : 'quality_1_alt'; }}>
+                          <span class="quality-label-text">
+                            {selectedAudioQuality}
+                          </span>
+                        </button>
+                        {#if activeDropdown === 'quality_1_alt'}
+                          <div class="custom-dropdown-menu" transition:fly={{ y: 12, duration: 400, easing: cubicOut }}>
+                            {#each AUDIO_QUALITY_OPTIONS as q}
+                              <button class="custom-dropdown-item" onclick={() => { selectedAudioQuality = q; activeDropdown = null; }}>
+                                {q}
                               </button>
                             {/each}
                           </div>
@@ -2543,23 +2606,25 @@
                 {#if isDownloading}<span class="progress-percent">{Math.round(progress * 100)}%</span>{/if}
               </div>
               <div class="yt-controls">
-                <div class="yt-format-row">
-                  <div class="format-slider" style="transform: translateX({selectedDownloadType === 'video' ? 'calc(100% + 3px)' : '0%'})"></div>
-                  <button
-                    type="button"
-                    class="format-tab"
-                    class:active={selectedDownloadType === "audio"}
-                    onclick={() => { selectedDownloadType = "audio"; }}
-                    disabled={isDownloading}
-                  >Audio</button>
-                  <button
-                    type="button"
-                    class="format-tab"
-                    class:active={selectedDownloadType === "video"}
-                    onclick={() => { selectedDownloadType = "video"; }}
-                    disabled={isDownloading}
-                  >Video</button>
-                </div>
+                {#if isYoutubePlaylist}
+                  <div class="yt-format-row">
+                    <div class="format-slider" style="transform: translateX({selectedDownloadType === 'video' ? 'calc(100% + 3px)' : '0%'})"></div>
+                    <button
+                      type="button"
+                      class="format-tab"
+                      class:active={selectedDownloadType === "audio"}
+                      onclick={() => { selectedDownloadType = "audio"; }}
+                      disabled={isDownloading}
+                    >Audio</button>
+                    <button
+                      type="button"
+                      class="format-tab"
+                      class:active={selectedDownloadType === "video"}
+                      onclick={() => { selectedDownloadType = "video"; }}
+                      disabled={isDownloading}
+                    >Video</button>
+                  </div>
+                {/if}
                 
                 <div class="dl-btn-group">
                   <div class="custom-dropdown-container format-collapse" class:collapsed={selectedDownloadType !== "audio"}>
@@ -3945,6 +4010,17 @@
     font-size: 0.95rem;
     font-weight: 300;
     letter-spacing: 0.5px;
+  }
+
+  .window-controls-standalone {
+    position: fixed;
+    top: calc(2.8rem + var(--titlebar-offset, 0px));
+    transform: translateY(-50%);
+    right: 2.4rem;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
   }
 
   .profile-widget {
