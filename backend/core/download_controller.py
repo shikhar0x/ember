@@ -153,6 +153,13 @@ class DownloadController:
         pl_dir  = self.download_dir / safe_pl
         pl_dir.mkdir(parents=True, exist_ok=True)
         
+        # Pre-warm FFmpeg so it's ready before concurrent downloads start
+        from core.utils import get_ffmpeg_details
+        try:
+            get_ffmpeg_details(download_callback=callback)
+        except Exception:
+            pass  # Individual downloads will handle this too
+
         # Open folder at the beginning of batch download
         open_folder(pl_dir)
 
@@ -215,6 +222,10 @@ class DownloadController:
             track_futures[fut] = (i, t.title)
             if task_id and tr._active_registry:
                 tr._active_registry.register_sub_future(task_id, fut)
+            # Stagger submissions to prevent YouTube rate-limiting
+            if i < total - 1 and getattr(t, "source", "spotify") == "ytmusic":
+                import time
+                time.sleep(0.5)
 
         for fut in concurrent.futures.as_completed(track_futures.keys()):
             idx, current_title = track_futures[fut]

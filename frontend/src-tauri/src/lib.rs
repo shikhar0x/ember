@@ -263,10 +263,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![init_backend])
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(target_os = "linux")]
             {
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = _app.get_webview_window("main") {
                     let _ = window.with_webview(|webview| {
                         use webkit2gtk::WebViewExt;
                         let webview_ptr = webview.inner();

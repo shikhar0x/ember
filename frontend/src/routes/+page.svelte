@@ -520,6 +520,41 @@
     const preventContextMenu = (e: MouseEvent) => e.preventDefault();
     window.addEventListener('contextmenu', preventContextMenu);
 
+    const handleGlobalKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeProfileMenu();
+        activeDropdown = null;
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeydown);
+
+    const handleGlobalMousedown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target) return;
+
+      const profileBtn = document.querySelector('.profile-btn');
+      const profileDropdown = document.querySelector('.profile-dropdown');
+      const isClickInsideProfile = (profileBtn && profileBtn.contains(target)) || (profileDropdown && profileDropdown.contains(target));
+      if (!isClickInsideProfile) {
+        closeProfileMenu();
+      }
+
+      if (activeDropdown) {
+        const containers = document.querySelectorAll('.custom-dropdown-container');
+        let clickedInsideAnyContainer = false;
+        for (const container of containers) {
+          if (container.contains(target)) {
+            clickedInsideAnyContainer = true;
+            break;
+          }
+        }
+        if (!clickedInsideAnyContainer) {
+          activeDropdown = null;
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleGlobalMousedown, true);
+
     if (isTauri()) {
       import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
         const appWindow = getCurrentWindow();
@@ -626,6 +661,8 @@
 
     return () => {
       window.removeEventListener('contextmenu', preventContextMenu);
+      window.removeEventListener('keydown', handleGlobalKeydown);
+      document.removeEventListener('mousedown', handleGlobalMousedown, true);
       clearInterval(clockInterval);
       if (unlistenDragDrop) {
         unlistenDragDrop();
@@ -721,6 +758,9 @@
     isFetching = true;
     statusText = "Inspecting...";
     pairedUrl = "";
+    progress = 0;
+    batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
+    isDownloading = false;
     
     const trimmedUrl = url.trim();
     const existingIndex = searchHistory.findIndex(h => (typeof h === 'string' ? h : h.url) === trimmedUrl);
@@ -1545,7 +1585,7 @@
   );
 </script>
 
-<svelte:window onclick={() => { closeProfileMenu(); activeDropdown = null; }} oncontextmenu={(e) => e.preventDefault()} />
+<svelte:window oncontextmenu={(e) => e.preventDefault()} />
 
 
 
@@ -4163,8 +4203,6 @@
     background: rgba(0, 0, 0, 0.45);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 16px;
-    backdrop-filter: blur(40px);
-    -webkit-backdrop-filter: blur(40px);
     box-shadow:
       inset 0 1.5px 0 rgba(255, 255, 255, 0.25),
       inset 0 -1.5px 0 rgba(0, 0, 0, 0.25),
@@ -4175,6 +4213,17 @@
     flex-direction: column;
     min-height: 250px;
     transition: min-height 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+    transform: translateZ(0);
+    will-change: transform;
+  }
+  .profile-dropdown::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: -1;
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    pointer-events: none;
   }
   .profile-submenu-container {
     display: flex;
@@ -5211,8 +5260,6 @@
   /* Dropdowns - Match glass-card transparency exactly */
   .profile-widget.light-theme .profile-dropdown {
     background: rgba(255, 255, 255, 0.55) !important;
-    backdrop-filter: blur(24px) !important;
-    -webkit-backdrop-filter: blur(24px) !important;
     border-color: rgba(0, 0, 0, 0.06) !important;
     border-top-color: rgba(255, 255, 255, 0.6) !important;
     border-bottom-color: rgba(0, 0, 0, 0.02) !important;
@@ -5220,6 +5267,10 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.4),
       0 10px 30px rgba(0, 0, 0, 0.06), 
       0 1px 1px rgba(0, 0, 0, 0.03) !important;
+  }
+  .profile-widget.light-theme .profile-dropdown::before {
+    backdrop-filter: blur(24px) !important;
+    -webkit-backdrop-filter: blur(24px) !important;
   }
   
   /* Divider adjustments */
@@ -6200,8 +6251,6 @@
     background: rgba(0, 0, 0, 0.45);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 12px;
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
     box-shadow:
       inset 0 1px 0 rgba(255,255,255,0.15),
       inset 0 -1px 0 rgba(0,0,0,0.15),
@@ -6211,7 +6260,18 @@
     display: flex;
     flex-direction: column;
     z-index: 500;
+    transform: translateZ(0);
+    will-change: transform;
     /* animation removed in favor of Svelte transition */
+  }
+  .custom-dropdown-menu::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: -1;
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    pointer-events: none;
   }
   .custom-dropdown-item {
     width: 100%;

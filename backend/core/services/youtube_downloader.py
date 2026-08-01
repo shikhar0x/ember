@@ -139,6 +139,14 @@ def download_generic(
         temp_stem = f"{safe_title}.temp"
         out_tpl   = str(dest / f"{temp_stem}.%(ext)s")
 
+        # Clean up stale temp files from any previous failed attempt
+        for p in dest.iterdir():
+            if p.is_file() and p.name.startswith(temp_stem):
+                try:
+                    os.remove(str(p))
+                except OSError:
+                    pass
+
         if "Audio" in fmt:
             bitrate = "320k"
             if audio_quality and audio_quality.isdigit():
@@ -157,6 +165,11 @@ def download_generic(
                 "cookiefile": cookie_file,
                 "format": audio_format_str,
                 "prefer_ffmpeg": True,
+                "retries": 3,
+                "fragment_retries": 3,
+                "extractor_retries": 3,
+                "retry_sleep_functions": {"http": lambda n: 2 ** n},
+                "socket_timeout": 30,
                 "progress_hooks": [make_hook("audio")],
                 "postprocessor_hooks": [lambda d: emit(callback, progress_event(1.0, f"Converting to {audio_codec.upper()}...")) if d["status"] == "started" else None],
                 "postprocessors": [{
@@ -172,8 +185,6 @@ def download_generic(
                 ydl_opts["postprocessor_args"]["ffmpeg"].extend(["-b:a", bitrate, "-joint_stereo", "1", "-id3v2_version", "3", "-write_id3v1", "1"])
             else:
                 ydl_opts["postprocessor_args"]["ffmpeg"].extend(["-b:a", bitrate])
-
-
 
             ydl_opts["ffmpeg_location"] = ffmpeg_location
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -206,6 +217,11 @@ def download_generic(
                     "keepvideo": True,
                     "cookiefile": cookie_file,
                     "format": format_selector,
+                    "retries": 3,
+                    "fragment_retries": 3,
+                    "extractor_retries": 3,
+                    "retry_sleep_functions": {"http": lambda n: 2 ** n},
+                    "socket_timeout": 30,
                     "progress_hooks": [make_hook(stream_type)],
                 }
 
@@ -290,7 +306,11 @@ def download_generic(
                         pass
         raise
     except Exception as e:
+        import traceback
         print(f"[YoutubeDL] generic download error: {e}")
+        print(f"[YoutubeDL] URL: {url}")
+        print(f"[YoutubeDL] FFmpeg location: {ffmpeg_location}")
+        print(f"[YoutubeDL] Traceback:\n{traceback.format_exc()}")
         emit(callback, error_event("Failed"))
         return False
 
