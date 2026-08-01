@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke, isTauri } from '@tauri-apps/api/core';
-  import { openUrl } from '@tauri-apps/plugin-opener';
+  import { openUrl, openPath } from '@tauri-apps/plugin-opener';
   import { fade, fly, scale, crossfade, slide } from 'svelte/transition';
   import { quintOut, cubicOut, backOut } from 'svelte/easing';
 
@@ -1415,7 +1415,27 @@
   async function openDownloadsFolder() {
     try {
       const res = await fetch(`${API_BASE}/open_download_dir`, { method: "POST" });
-      if (!res.ok) {
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "error") {
+          if (isTauri() && data.path) {
+            try {
+              await openPath(data.path);
+            } catch (err) {
+              console.error("Tauri openPath failed:", err);
+              // Fallback to openUrl if openPath fails
+              try {
+                await openUrl(data.path);
+              } catch (urlErr) {
+                console.error("Tauri openUrl failed:", urlErr);
+                showToast("Failed to open downloads folder", "error");
+              }
+            }
+          } else {
+            showToast("Failed to open downloads folder", "error");
+          }
+        }
+      } else {
         showToast("Failed to open downloads folder", "error");
       }
     } catch (e) {

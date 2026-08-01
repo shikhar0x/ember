@@ -68,10 +68,20 @@ class DownloadController:
         callback: Optional[Callable[[dict], None]] = None,
     ) -> concurrent.futures.Future:
         """Submit a single-track Spotify download to the executor."""
-        fut = self._executor.submit(
-            _spotify.download_track,
-            track, options, target_dir or self.download_dir, callback,
-        )
+        def _download_with_retry():
+            success = False
+            try:
+                success = _spotify.download_track(track, options, target_dir or self.download_dir, callback)
+            except Exception:
+                success = False
+            if not success:
+                try:
+                    success = _spotify.download_track(track, options, target_dir or self.download_dir, callback)
+                except Exception:
+                    success = False
+            return success
+
+        fut = self._executor.submit(_download_with_retry)
         return self._track_future(fut)
 
     def download_playlist(
@@ -98,10 +108,20 @@ class DownloadController:
         callback: Optional[Callable[[dict], None]] = None,
     ) -> concurrent.futures.Future:
         """Submit a YouTube / direct-URL download to the executor."""
-        fut = self._executor.submit(
-            _youtube.download_generic,
-            data, options, target_dir or self.download_dir, callback,
-        )
+        def _download_with_retry():
+            success = False
+            try:
+                success = _youtube.download_generic(data, options, target_dir or self.download_dir, callback)
+            except Exception:
+                success = False
+            if not success:
+                try:
+                    success = _youtube.download_generic(data, options, target_dir or self.download_dir, callback)
+                except Exception:
+                    success = False
+            return success
+
+        fut = self._executor.submit(_download_with_retry)
         return self._track_future(fut)
 
     def download_media(
@@ -163,18 +183,33 @@ class DownloadController:
         batch_options = dict(options)
         batch_options["open_on_complete"] = False
 
-        for i, t in enumerate(tracks):
-            if getattr(t, "source", "spotify") == "ytmusic":
-                dl_url = getattr(t, "spotify_url", None) or getattr(t, "url", None)
-                if dl_url:
-                    fut = self._executor.submit(
-                        _youtube.download_generic, t, batch_options, pl_dir, make_callback(i),
-                    )
+        def download_with_retry(track, opts, target_dir, callback_fn):
+            success = False
+            try:
+                if getattr(track, "source", "spotify") == "ytmusic":
+                    success = _youtube.download_generic(track, opts, target_dir, callback_fn)
                 else:
-                    fut = self._executor.submit(lambda: False)
+                    success = _spotify.download_track(track, opts, target_dir, callback_fn)
+            except Exception:
+                success = False
+
+            if not success:
+                # Silent retry once again
+                try:
+                    if getattr(track, "source", "spotify") == "ytmusic":
+                        success = _youtube.download_generic(track, opts, target_dir, callback_fn)
+                    else:
+                        success = _spotify.download_track(track, opts, target_dir, callback_fn)
+                except Exception:
+                    success = False
+            return success
+
+        for i, t in enumerate(tracks):
+            if getattr(t, "source", "spotify") == "ytmusic" and not (getattr(t, "spotify_url", None) or getattr(t, "url", None)):
+                fut = self._executor.submit(lambda: False)
             else:
                 fut = self._executor.submit(
-                    _spotify.download_track, t, batch_options, pl_dir, make_callback(i),
+                    download_with_retry, t, batch_options, pl_dir, make_callback(i),
                 )
             self._track_future(fut)
             track_futures[fut] = (i, t.title)

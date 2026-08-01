@@ -137,7 +137,8 @@ def download_track(
         tag_audio(track, str(final_path), cover_bytes)
 
         _log_final(final_path, ext, track)
-        open_folder(dest)
+        if options.get("open_on_complete", True):
+            open_folder(dest)
         emit(callback, complete_event(True, "Success!"))
         return True
 

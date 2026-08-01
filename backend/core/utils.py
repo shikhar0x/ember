@@ -103,8 +103,13 @@ def open_folder(path: "Path" | str) -> None:
                                 if win32gui.IsIconic(hwnd):
                                     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                                 else:
-                                    win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-                                win32gui.SetForegroundWindow(hwnd)
+                                    # Force focus by minimizing and restoring
+                                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                                try:
+                                    win32gui.SetForegroundWindow(hwnd)
+                                except Exception:
+                                    pass
                             break
                     except Exception:
                         continue
