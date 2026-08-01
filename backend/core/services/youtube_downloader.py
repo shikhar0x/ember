@@ -270,7 +270,8 @@ def download_generic(
             except Exception:
                 pass
 
-        open_folder(dest)
+        if options.get("open_on_complete", True):
+            open_folder(dest)
         emit(callback, complete_event(True, "Success!"))
         return True
 

@@ -236,7 +236,8 @@ def download_track_manual(
         tag_audio(spotify_track, str(final_path), cover_bytes)
 
         _log_final(final_path, ext, spotify_track)
-        open_folder(dest)
+        if options.get("open_on_complete", True):
+            open_folder(dest)
         emit(callback, complete_event(True, "Success!"))
         return True
 

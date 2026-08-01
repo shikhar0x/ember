@@ -132,13 +132,14 @@ class DownloadController:
         safe_pl = core_sanitize(playlist_title) or "Playlist_Download"
         pl_dir  = self.download_dir / safe_pl
         pl_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Open folder at the beginning of batch download
+        open_folder(pl_dir)
 
         total     = len(tracks)
         completed = 0
         succeeded = 0
         failed    = 0
-
-        pl_dir.mkdir(parents=True, exist_ok=True)
 
         track_futures = {}
         track_progress = {i: 0.0 for i in range(total)}
@@ -158,18 +159,22 @@ class DownloadController:
         import api.task_registry as tr
         task_id = getattr(callback, "task_id", None)
 
+        # Suppress opening folder on individual track completion
+        batch_options = dict(options)
+        batch_options["open_on_complete"] = False
+
         for i, t in enumerate(tracks):
             if getattr(t, "source", "spotify") == "ytmusic":
                 dl_url = getattr(t, "spotify_url", None) or getattr(t, "url", None)
                 if dl_url:
                     fut = self._executor.submit(
-                        _youtube.download_generic, t, options, pl_dir, make_callback(i),
+                        _youtube.download_generic, t, batch_options, pl_dir, make_callback(i),
                     )
                 else:
                     fut = self._executor.submit(lambda: False)
             else:
                 fut = self._executor.submit(
-                    _spotify.download_track, t, options, pl_dir, make_callback(i),
+                    _spotify.download_track, t, batch_options, pl_dir, make_callback(i),
                 )
             self._track_future(fut)
             track_futures[fut] = (i, t.title)
@@ -191,4 +196,3 @@ class DownloadController:
             emit(callback, batch_event(completed, total, succeeded, failed, current_title=current_title))
 
         emit(callback, batch_end_event(succeeded, failed))
-        open_folder(pl_dir)

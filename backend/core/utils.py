@@ -85,11 +85,38 @@ def open_folder(path: "Path" | str) -> None:
 
     try:
         if sys.platform == "win32":
-            subprocess.Popen(
-                ["explorer", str(path)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                env=env,
-            )
+            already_open = False
+            try:
+                import win32com.client
+                import win32gui
+                import win32con
+                
+                shell = win32com.client.Dispatch("Shell.Application")
+                target_norm = os.path.normpath(str(path)).lower()
+                for window in shell.Windows():
+                    try:
+                        win_path = window.Document.Folder.Self.Path
+                        if os.path.normpath(win_path).lower() == target_norm:
+                            already_open = True
+                            hwnd = window.HWND
+                            if hwnd:
+                                if win32gui.IsIconic(hwnd):
+                                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                                else:
+                                    win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+                                win32gui.SetForegroundWindow(hwnd)
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            if not already_open:
+                subprocess.Popen(
+                    ["explorer", str(path)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    env=env,
+                )
         elif sys.platform == "darwin":
             subprocess.Popen(
                 ["open", str(path)],
