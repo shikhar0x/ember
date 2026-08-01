@@ -289,12 +289,7 @@ class InputParser:
         if not is_single_video:
             ydl_opts['extract_flat'] = 'in_playlist'
 
-        if os.name == "nt":
-            ydl_opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["android", "web"]
-                }
-            }
+
         
         info = None
         try:

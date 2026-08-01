@@ -68,24 +68,39 @@ def get_ffmpeg_details(timeout: float = 120.0, download_callback=None) -> tuple[
 def open_folder(path: "Path" | str) -> None:
     """Open a folder in the system file manager (non-blocking)."""
     import sys
+    import os
     import subprocess
     from pathlib import Path
     path = Path(path)
+    
+    # Extract clean environment to prevent PyInstaller's LD_LIBRARY_PATH rewriting
+    # from breaking system utilities (like xdg-open/open).
+    env = dict(os.environ)
+    for var in ["LD_LIBRARY_PATH", "LIBPATH"]:
+        orig = f"{var}_ORIG"
+        if orig in env:
+            env[var] = env[orig]
+        else:
+            env.pop(var, None)
+
     try:
         if sys.platform == "win32":
             subprocess.Popen(
                 ["explorer", str(path)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=env,
             )
         elif sys.platform == "darwin":
             subprocess.Popen(
                 ["open", str(path)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=env,
             )
         else:
             subprocess.Popen(
                 ["xdg-open", str(path)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=env,
             )
     except Exception:
         pass

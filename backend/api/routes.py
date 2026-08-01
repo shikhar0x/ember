@@ -80,20 +80,12 @@ def _track_from_schema(s) -> Track:
 
 @router.post("/open_download_dir")
 def open_download_dir():
-    import os
-    import subprocess
-    import sys
+    from core.utils import open_folder
     try:
-        path = str(_controller.download_dir)
-        if sys.platform == "win32":
-            os.startfile(path)
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
-        return {"status": "ok"}
+        open_folder(_controller.download_dir)
+        return {"status": "ok", "path": str(_controller.download_dir)}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": str(e), "path": str(_controller.download_dir)}
 
 
 def _submit(submit_fn, *args, **kwargs) -> TaskResponse:

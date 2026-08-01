@@ -341,6 +341,16 @@ class TokenManager:
             if sys.platform != "win32":
                 kwargs["preexec_fn"] = os.setsid
 
+            # Clean env to prevent PyInstaller's LD_LIBRARY_PATH from breaking browser launch
+            env = dict(os.environ)
+            for var in ["LD_LIBRARY_PATH", "LIBPATH"]:
+                orig = f"{var}_ORIG"
+                if orig in env:
+                    env[var] = env[orig]
+                else:
+                    env.pop(var, None)
+            kwargs["env"] = env
+
             return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
 
         def terminate_process_group(proc):

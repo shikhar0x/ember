@@ -2810,11 +2810,12 @@
   header { text-align: center; margin-bottom: 2.5rem; transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
   header.compact {
     position: fixed;
-    top: calc(2.8rem + 7px + var(--titlebar-offset, 0px));
+    top: calc(2.8rem + var(--titlebar-offset, 0px));
     transform: translateY(-50%);
-    left: 14rem;
-    right: 28rem;
-    max-width: calc(100vw - 43rem);
+    left: 16rem;
+    right: 34rem;
+    width: auto;
+    max-width: none;
     min-width: 0;
     margin: 0;
     padding: 0;
@@ -2824,6 +2825,8 @@
     z-index: 99;
     overflow: hidden;
     transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    box-sizing: border-box;
+    height: 62px;
   }
   h1 {
     font-family: 'Outfit', sans-serif;
@@ -2844,7 +2847,7 @@
     max-width: 580px;
     width: 100%;
     min-width: 0;
-    margin: 0 auto;
+    margin: 0 auto !important;
     overflow: hidden;
     transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
   }
@@ -2857,6 +2860,10 @@
     text-align: center;
     padding-left: 3.1rem;
     padding-right: 3.1rem;
+    box-sizing: border-box;
+    height: 62px;
+    width: 100%;
+    min-width: 0;
   }
 
   .input-wrapper .search-divider {
@@ -2915,6 +2922,7 @@
     flex: 1;
     display: flex;
     align-items: center;
+    min-width: 0 !important;
   }
   .input-wrapper .search-icon {
     position: absolute;
@@ -3967,9 +3975,9 @@
     z-index: 1000;
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.8rem;
     background: rgba(255,255,255,0.02);
-    padding: 0.25rem 0.8rem;
+    padding: 0.4rem 1.2rem;
     border-radius: 100px;
     border: 1px solid rgba(255,255,255,0.08);
     backdrop-filter: blur(24px);
@@ -3983,6 +3991,8 @@
       inset 0 -1px 0 rgba(0,0,0,0.15),
       0 8px 32px rgba(0,0,0,0.25),
       0 2px 6px rgba(0,0,0,0.12);
+    box-sizing: border-box;
+    height: 62px;
   }
   .clock-date {
     display: flex;
@@ -3992,22 +4002,22 @@
     line-height: 1.05;
   }
   .clock-month {
-    font-size: 0.7rem;
+    font-size: 0.8rem;
     font-weight: 700;
     letter-spacing: 0.5px;
     color: #e11d2e;
   }
   .clock-day {
-    font-size: 1.25rem;
+    font-size: 1.45rem;
     font-weight: 600;
   }
   .clock-divider {
     width: 1px;
-    height: 24px;
+    height: 32px;
     background: rgba(255, 255, 255, 0.1);
   }
   .clock-time {
-    font-size: 0.95rem;
+    font-size: 1.2rem;
     font-weight: 300;
     letter-spacing: 0.5px;
   }
@@ -4043,6 +4053,8 @@
       inset 0 -1px 0 rgba(0,0,0,0.15),
       0 8px 32px rgba(0,0,0,0.25),
       0 2px 6px rgba(0,0,0,0.12);
+    box-sizing: border-box;
+    height: 62px;
   }
   .profile-divider {
     width: 1px;
@@ -5911,33 +5923,43 @@
     /* Compact Clock Widget */
     .clock-widget {
       left: 2rem;
-      padding: 0.3rem 0.8rem;
-      gap: 0.5rem;
-    box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.15),
-      inset 0 -1px 0 rgba(0,0,0,0.15);
-  }
+      padding: 0.3rem 1.0rem;
+      gap: 0.6rem;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.15),
+        inset 0 -1px 0 rgba(0,0,0,0.15);
+      box-sizing: border-box;
+      height: 48px;
+    }
     .clock-month {
-      font-size: 0.8rem;
+      font-size: 0.7rem;
     }
     .clock-day {
-      font-size: 1.4rem;
+      font-size: 1.15rem;
     }
     .clock-divider {
-      height: 28px;
+      height: 22px;
     }
     .clock-time {
-      font-size: 1.0rem;
+      font-size: 0.95rem;
     }
 
     /* Compact Profile Widget */
     .profile-widget {
       right: 2.4rem;
       padding: 0.3rem;
-    box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.15),
-      inset 0 -1px 0 rgba(0,0,0,0.15);
-  }
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.15),
+        inset 0 -1px 0 rgba(0,0,0,0.15);
+      box-sizing: border-box;
+      height: 48px;
+    }
+    .top-bar-input input {
+      height: 48px;
+    }
+    header.compact {
+      height: 48px;
+    }
     .profile-btn {
       padding: 0.2rem 0.8rem 0.2rem 0.8rem;
       gap: 0.6rem;
@@ -5985,20 +6007,9 @@
 
   @media (max-width: 1000px) {
     header.compact {
-      left: 12rem;
+      left: 14rem;
       right: 26rem;
     }
-  }
-
-  @media (max-width: 650px) {
-    header.compact {
-      left: 10rem;
-      right: 18rem;
-    }
-  }
-
-  /* For extremely narrow screens */
-  @media (max-width: 650px) {
     .profile-name,
     .profile-divider {
       display: none;
@@ -6007,6 +6018,21 @@
       padding: 0.2rem;
       width: auto;
       gap: 0;
+    }
+    .top-bar-input input {
+      box-sizing: border-box !important;
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+  }
+
+  @media (max-width: 650px) {
+    header.compact {
+      left: 12rem;
+      right: 14rem;
+    }
+    .nav-arrows-inline {
+      display: none;
     }
   }
 

@@ -173,12 +173,7 @@ def download_generic(
             else:
                 ydl_opts["postprocessor_args"]["ffmpeg"].extend(["-b:a", bitrate])
 
-            if os.name == "nt":
-                ydl_opts["extractor_args"] = {
-                    "youtube": {
-                        "player_client": ["android", "web"]
-                    }
-                }
+
 
             ydl_opts["ffmpeg_location"] = ffmpeg_location
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -213,12 +208,7 @@ def download_generic(
                     "format": format_selector,
                     "progress_hooks": [make_hook(stream_type)],
                 }
-                if os.name == "nt":
-                    opts["extractor_args"] = {
-                        "youtube": {
-                            "player_client": ["android", "web"]
-                        }
-                    }
+
                 opts["ffmpeg_location"] = ffmpeg_location
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     ydl.download([url])
