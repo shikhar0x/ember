@@ -29,6 +29,8 @@ Ember matches Spotify tracks to the best available YouTube source using ISRC cod
 - **Video downloads**: Download YouTube links directly as MP4 video files up to 1080p.
 - **Custom audio formats & quality**: Output to MP3, FLAC, M4A, OGG, OPUS, or WAV with selectable bitrate targets (up to 320 kbps).
 - **Save Cover Art**: Quick-export cover art imagery directly to your local drive.
+- **Custom Frameless Window**: Custom sleek title bar, window control buttons, and resize borders for a clean desktop appearance.
+- **Open Downloads Folder**: Quick-access button to open and focus your downloads folder directly from the app.
 - **Custom Themes & Wallpapers**: Personalized interface styling with curated wallpaper backgrounds, opacity, and blur settings.
 
 ## Quick Start
