@@ -19,7 +19,7 @@ import yt_dlp
 
 from core.http_helper import HTTP_HEADERS
 from core.events import emit, status_event, complete_event, error_event
-from core.utils import open_folder
+
 
 
 def download_media(
@@ -87,7 +87,6 @@ def download_media(
                     print(f"Video download failed: {e}")
 
         if saved:
-            open_folder(dest)
             s = saved
             emit(callback, complete_event(True, f"Saved {s} Item{'s' if s > 1 else ''}!"))
             return True
@@ -100,7 +99,7 @@ def download_media(
         path = dest / f"{safe_title}.{ext}"
         with open(path, "wb") as f:
             f.write(thumb_bytes)
-        open_folder(dest)
+
         emit(callback, complete_event(True, "Image Saved!"))
         return True
 
@@ -119,7 +118,7 @@ def download_media(
                 path = dest / f"{safe_title}.{ext}"
                 with open(path, "wb") as f:
                     f.write(r.content)
-                open_folder(dest)
+
                 emit(callback, complete_event(True, "Image Saved!"))
                 return True
         except Exception as e:

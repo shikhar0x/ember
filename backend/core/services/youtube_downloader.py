@@ -19,7 +19,7 @@ import yt_dlp
 
 from core.services.cookie_manager import get_cookie_file
 from core.events import emit, progress_event, complete_event, error_event, TaskCancelledException
-from core.utils import sanitize_filename as core_sanitize, open_folder
+from core.utils import sanitize_filename as core_sanitize
 from core.services.spotify_downloader import _log_final
 
 
@@ -286,8 +286,6 @@ def download_generic(
             except Exception:
                 pass
 
-        if options.get("open_on_complete", True):
-            open_folder(dest)
         emit(callback, complete_event(True, "Success!"))
         return True
 

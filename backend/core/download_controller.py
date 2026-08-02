@@ -21,7 +21,7 @@ import concurrent.futures
 from pathlib import Path
 from typing import Callable, Optional
 
-from core.utils import sanitize_filename as core_sanitize, open_folder
+from core.utils import sanitize_filename as core_sanitize
 from core.events import emit, batch_event, batch_end_event, progress_event
 
                                                                       
@@ -160,9 +160,6 @@ class DownloadController:
         except Exception:
             pass  # Individual downloads will handle this too
 
-        # Open folder at the beginning of batch download
-        open_folder(pl_dir)
-
         total     = len(tracks)
         completed = 0
         succeeded = 0
@@ -180,17 +177,22 @@ class DownloadController:
                         overall_pct = (completed + sum(track_progress.values())) / total
                     current_song = completed + 1 if completed + 1 <= total else total
                     emit(callback, progress_event(overall_pct, f"Downloading {current_song}/{total} songs..."))
+                    emit(callback, {
+                        "type": "batch_track_progress",
+                        "index": index,
+                        "progress": event.get("progress", 0.0)
+                    })
             _cb.is_cancelled = lambda: getattr(callback, "is_cancelled", lambda: False)()
             return _cb
 
         import api.task_registry as tr
         task_id = getattr(callback, "task_id", None)
 
-        # Suppress opening folder on individual track completion
         batch_options = dict(options)
-        batch_options["open_on_complete"] = False
 
         def download_with_retry(track, opts, target_dir, callback_fn):
+            # Signal start of this track's download
+            callback_fn({"type": "progress", "progress": 0.0})
             success = False
             try:
                 if getattr(track, "source", "spotify") == "ytmusic":
@@ -232,13 +234,15 @@ class DownloadController:
             with progress_lock:
                 completed += 1
                 track_progress[idx] = 0.0
+            success = False
             try:
                 if fut.result():
                     succeeded += 1
+                    success = True
                 else:
                     failed += 1
             except Exception:
                 failed += 1
-            emit(callback, batch_event(completed, total, succeeded, failed, current_title=current_title))
+            emit(callback, batch_event(completed, total, succeeded, failed, current_title=current_title, index=idx, success=success))
 
         emit(callback, batch_end_event(succeeded, failed))

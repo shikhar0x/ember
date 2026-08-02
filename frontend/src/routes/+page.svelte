@@ -349,6 +349,8 @@
   let playlistTracks: (TrackInfo | null)[] = [];
   let selectedIndices: Set<number> = new Set();
   let batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
+  let downloadingTrackIndices: number[] = [];
+  let batchTrackStates: Record<number, "downloading" | "completed" | "failed"> = {};
 
   type HistorySnapshot = {
     url: string;
@@ -760,6 +762,8 @@
     pairedUrl = "";
     progress = 0;
     batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
+    downloadingTrackIndices = [];
+    batchTrackStates = {};
     isDownloading = false;
     
     const trimmedUrl = url.trim();
@@ -914,6 +918,8 @@
     statusText = getIdleText();
     progress = 0;
     batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
+    downloadingTrackIndices = [];
+    batchTrackStates = {};
     downloadSuccess = null;
     url = "";
     pairedUrl = "";
@@ -952,6 +958,8 @@
     progress = 0;
     taskId = null;
     batchProgress = { completed: 0, total: 0, succeeded: 0, failed: 0 };
+    downloadingTrackIndices = [];
+    batchTrackStates = {};
     fetchError = "";
     url = snap.url;
     track = snap.track;
@@ -1171,7 +1179,10 @@
         };
       }
 
-      const selectedTracks = [...selectedIndices].sort((a, b) => a - b).map(i => playlistTracks[i]).filter(t => t !== null && !t.unavailable);
+      const selectedTracksIndices = [...selectedIndices].sort((a, b) => a - b).filter(i => playlistTracks[i] !== null && !playlistTracks[i].unavailable);
+      const selectedTracks = selectedTracksIndices.map(i => playlistTracks[i]);
+      downloadingTrackIndices = selectedTracksIndices;
+      batchTrackStates = {};
       batchProgress = { completed: 0, total: selectedTracks.length, succeeded: 0, failed: 0 };
       
       const body = {
@@ -1240,10 +1251,12 @@
     downloadSuccess = null;
     progress = 0;
     taskId = null;
+    downloadingTrackIndices = [];
+    batchTrackStates = {};
     showToast('Download cancelled', 'cancel');
   }
 
-  function handleEvent(payload: { type: string; message?: string; progress?: number; completed?: number; total?: number; succeeded?: number; failed?: number; success?: boolean; current_track_title?: string }) {
+  function handleEvent(payload: { type: string; message?: string; progress?: number; completed?: number; total?: number; succeeded?: number; failed?: number; success?: boolean; current_track_title?: string; index?: number }) {
     const t = payload.type;
     const msg = payload.message || "";
     if (t === "progress") {
@@ -1263,6 +1276,23 @@
       const current = batchProgress.completed + 1 > batchProgress.total ? batchProgress.total : batchProgress.completed + 1;
       const title = payload.current_track_title || "Track";
       statusText = `Downloading: "${title}" (${current}/${batchProgress.total})`;
+
+      if (payload.index !== undefined && payload.index >= 0) {
+        const origIdx = downloadingTrackIndices[payload.index];
+        if (origIdx !== undefined) {
+          batchTrackStates[origIdx] = payload.success ? "completed" : "failed";
+          batchTrackStates = batchTrackStates;
+        }
+      }
+    }
+    else if (t === "batch_track_progress") {
+      if (payload.index !== undefined && payload.index >= 0) {
+        const origIdx = downloadingTrackIndices[payload.index];
+        if (origIdx !== undefined && !batchTrackStates[origIdx]) {
+          batchTrackStates[origIdx] = "downloading";
+          batchTrackStates = batchTrackStates;
+        }
+      }
     }
     else if (t === "batch_end") {
       const s = payload.succeeded ?? 0;
@@ -1748,6 +1778,17 @@
                   <svg class="opt-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                 </button>
 
+                <button class="profile-opt-btn" onclick={openDownloadsFolder}>
+                  <svg class="opt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <div class="opt-text">
+                    <span class="opt-title">Open Downloads</span>
+                    <span class="opt-desc">Open the folder in File Explorer</span>
+                  </div>
+                  <svg class="opt-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+
                 <button class="profile-opt-btn" onclick={() => activeProfileSubMenu = 'about'}>
                   <svg class="opt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10" />
@@ -1757,17 +1798,6 @@
                   <div class="opt-text">
                     <span class="opt-title">About</span>
                     <span class="opt-desc">App details and information</span>
-                  </div>
-                  <svg class="opt-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-                </button>
-
-                <button class="profile-opt-btn" onclick={openDownloadsFolder}>
-                  <svg class="opt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                  </svg>
-                  <div class="opt-text">
-                    <span class="opt-title">Open Downloads</span>
-                    <span class="opt-desc">Open the folder in File Explorer</span>
                   </div>
                   <svg class="opt-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                 </button>
@@ -2626,13 +2656,35 @@
                 {#if t}
                 <button class="track-row" class:selected={selectedIndices.has(i)} onclick={() => toggleTrack(i)}>
                   <span class="track-check-wrapper">
-                    <span class="custom-checkbox" class:checked={selectedIndices.has(i)}>
-                      {#if selectedIndices.has(i)}
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+                    {#if batchTrackStates[i] === "downloading"}
+                      <span class="status-indicator downloading">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round">
+                          <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="8" style="opacity: 0.3;" />
+                          <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="8" />
+                        </svg>
+                      </span>
+                    {:else if batchTrackStates[i] === "completed"}
+                      <span class="status-indicator completed">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
                           <polyline points="20 6 9 17 4 12" />
                         </svg>
-                      {/if}
-                    </span>
+                      </span>
+                    {:else if batchTrackStates[i] === "failed"}
+                      <span class="status-indicator failed">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </span>
+                    {:else}
+                      <span class="custom-checkbox" class:checked={selectedIndices.has(i)}>
+                        {#if selectedIndices.has(i)}
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        {/if}
+                      </span>
+                    {/if}
                   </span>
                   <span class="track-num">{renderIdx + 1}</span>
                   {#if t.cover_url}<img class="track-thumb" src={t.cover_url} alt="" />{:else}<span class="track-thumb-placeholder">♪</span>{/if}
@@ -6153,6 +6205,44 @@
   }
   .track-row:hover .custom-checkbox:not(.checked) {
     border-color: rgba(225, 29, 46, 0.6);
+  }
+
+  /* Batch download status indicator styles */
+  .status-indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+  .status-indicator.downloading {
+    color: #E11D2E;
+  }
+  .status-indicator.downloading svg {
+    width: 16px;
+    height: 16px;
+    animation: spin 1s linear infinite;
+  }
+  .status-indicator.completed {
+    background: #10B981;
+    color: #FFFFFF;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.35);
+  }
+  .status-indicator.completed svg {
+    width: 11px;
+    height: 11px;
+    animation: drawCheck 0.22s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .status-indicator.failed {
+    background: #EF4444;
+    color: #FFFFFF;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.35);
+  }
+  .status-indicator.failed svg {
+    width: 11px;
+    height: 11px;
   }
 
   /* Responsive Grid Stacking for Details Layout */

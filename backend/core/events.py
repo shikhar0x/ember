@@ -62,6 +62,8 @@ def batch_event(
     succeeded: int,
     failed: int,
     current_title: str = "",
+    index: int = -1,
+    success: bool = False,
 ) -> dict:
     """Emit per-track progress within a playlist batch."""
     return {
@@ -73,6 +75,8 @@ def batch_event(
         "progress": completed / total if total else 0.0,
         "message": f"Progress: {completed}/{total}",
         "current_track_title": current_title,
+        "index": index,
+        "success": success,
     }
 
 

@@ -27,7 +27,7 @@ def _extract_youtube_video_id(url: str) -> Optional[str]:
 from core.pipeline import resolve
 from core.fetcher import fetch_audio
 from core.tagger import tag_audio
-from core.utils import sanitize_filename as core_sanitize, open_folder, get_ffmpeg_details
+from core.utils import sanitize_filename as core_sanitize, get_ffmpeg_details
 from core.http_helper import get_bytes
 from core.events import emit, progress_event, complete_event, error_event, TaskCancelledException
 
@@ -137,8 +137,7 @@ def download_track(
         tag_audio(track, str(final_path), cover_bytes)
 
         _log_final(final_path, ext, track)
-        if options.get("open_on_complete", True):
-            open_folder(dest)
+
         emit(callback, complete_event(True, "Success!"))
         return True
 
@@ -237,8 +236,6 @@ def download_track_manual(
         tag_audio(spotify_track, str(final_path), cover_bytes)
 
         _log_final(final_path, ext, spotify_track)
-        if options.get("open_on_complete", True):
-            open_folder(dest)
         emit(callback, complete_event(True, "Success!"))
         return True
 
