@@ -31,32 +31,50 @@
   };
 
   function setupWebAudio() {
-    if (audioCtx) return;
+    if (audioCtx) {
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume().then(() => {
+          console.log("[Ember MediaPlayer] AudioContext resumed -> audio routed to speakers!");
+        });
+      }
+      return;
+    }
 
-    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const source = audioCtx.createMediaElementSource(audioElement);
+    try {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioCtx.createMediaElementSource(audioElement);
 
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 64;
-    analyser.smoothingTimeConstant = 0.82;
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.82;
 
-    let previousNode: AudioNode = source;
-    EQ_BANDS.forEach((freq) => {
-      if (!audioCtx) return;
-      const filter = audioCtx.createBiquadFilter();
-      filter.type = "peaking";
-      filter.frequency.value = freq;
-      filter.Q.value = 1.4;
-      filter.gain.value = 0;
-      previousNode.connect(filter);
-      eqFilters.push(filter);
-      previousNode = filter;
-    });
+      let previousNode: AudioNode = source;
+      EQ_BANDS.forEach((freq) => {
+        if (!audioCtx) return;
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = "peaking";
+        filter.frequency.value = freq;
+        filter.Q.value = 1.4;
+        filter.gain.value = 0;
+        previousNode.connect(filter);
+        eqFilters.push(filter);
+        previousNode = filter;
+      });
 
-    previousNode.connect(analyser);
-    analyser.connect(audioCtx.destination);
+      previousNode.connect(analyser);
+      analyser.connect(audioCtx.destination);
 
-    drawVisualizer();
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume().then(() => {
+          console.log("[Ember MediaPlayer] AudioContext resumed -> audio routed to speakers!");
+        });
+      }
+
+      drawVisualizer();
+      console.log("[Ember MediaPlayer] Web Audio API initialized, state:", audioCtx.state);
+    } catch (e) {
+      console.error("[Ember MediaPlayer] Web Audio API error:", e);
+    }
   }
 
   function handleStyleChange(styleName: string) {
@@ -146,7 +164,10 @@
   });
 </script>
 
-<div class="fixed bottom-0 left-0 right-0 h-20 bg-neutral-900/95 border-t border-neutral-800 backdrop-blur-xl px-6 flex items-center justify-between z-50 select-none">
+<div
+  style="position: fixed; bottom: 0; left: 0; right: 0; height: 84px; z-index: 9999999 !important; background: rgba(18, 20, 26, 0.98); border-top: 1px solid rgba(255, 94, 98, 0.4); box-shadow: 0 -12px 35px rgba(0, 0, 0, 0.9);"
+  class="px-6 flex items-center justify-between select-none"
+>
   <audio
     bind:this={audioElement}
     src={audioUrl}

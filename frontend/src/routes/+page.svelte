@@ -25,7 +25,7 @@
       const durParam = t.duration || 0;
       activeAudioUrl = `http://127.0.0.1:8008/audio/stream?url=${encodeURIComponent(targetUrl)}&title=${titleParam}&artist=${artistParam}&isrc=${isrcParam}&duration=${durParam}`;
     }
-    console.log("[Ember UI] ▶ Play button clicked! Loading stream URL:", activeAudioUrl);
+    console.log("[Ember UI] ▶ Play button clicked! activePlayTrack:", activePlayTrack?.title, "stream URL:", activeAudioUrl);
   }
 
   function handleSaveToLibrary() {
