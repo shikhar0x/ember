@@ -1097,14 +1097,16 @@ def stream_remote_audio(
     request: Request = None,
 ):
     """
-    Proxy an audio stream from YouTube/YouTube Music to SvelteKit via FFmpeg MP3 encoding.
-    Bypasses Linux WebKitGTK/GStreamer 'fakevideosink' container errors by serving clean audio/mpeg.
-    Automatically resolves Spotify URLs to ISRC-matched YouTube streams.
+    Stream audio to SvelteKit via disk-cached FileResponse.
+    Bypasses Linux WebKitGTK/GStreamer chunked HTTP stream incompatibilities by providing
+    full Content-Length and Range request support.
     """
-    import subprocess
+    import os
+    import hashlib
     import yt_dlp
-    from fastapi import Request
-    from fastapi.responses import StreamingResponse
+    from pathlib import Path
+    from fastapi import Request, HTTPException
+    from fastapi.responses import FileResponse
     from core.utils import get_ffmpeg_details
 
     print(f"\n==============================================")
@@ -1112,7 +1114,6 @@ def stream_remote_audio(
     print(f"  URL:      {url}")
     print(f"  Title:    {title}")
     print(f"  Artist:   {artist}")
-    print(f"  ISRC:     {isrc}")
     print(f"==============================================")
 
     if "spotify.com" in url or "spotify:" in url:
@@ -1153,54 +1154,61 @@ def stream_remote_audio(
             print(f"[Ember Stream ERROR] Could not resolve YouTube match for Spotify track '{title or url}'")
             raise HTTPException(status_code=404, detail="Could not resolve YouTube match for Spotify track")
 
-    ffmpeg_exe, _ = get_ffmpeg_details()
-    ydl_opts = {"format": "bestaudio", "quiet": True, "noplaylist": True}
+    # Create stream cache directory
+    cache_dir = Path(_controller.download_dir) / ".cache" / "streams"
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[Ember Stream] Running yt-dlp to extract audio stream for: {url}")
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            stream_url = info.get("url")
-    except Exception as e:
-        print(f"[Ember Stream ERROR] yt-dlp extraction failed: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to resolve audio stream: {e}")
+    # Extract video_id for cache key
+    video_id = None
+    if "watch?v=" in url:
+        video_id = url.split("watch?v=")[-1].split("&")[0]
+    elif "youtu.be/" in url:
+        video_id = url.split("youtu.be/")[-1].split("?")[0]
+    else:
+        video_id = hashlib.md5(url.encode()).hexdigest()
 
-    if not stream_url:
-        print(f"[Ember Stream ERROR] No stream URL found for: {url}")
-        raise HTTPException(status_code=404, detail="No stream URL found")
+    cache_file = cache_dir / f"{video_id}.mp3"
 
-    print(f"[Ember Stream] yt-dlp resolved stream! URL: {stream_url[:75]}...")
-    print(f"[Ember Stream] Spawning FFmpeg MP3 encoding pipeline...")
-
-    cmd = [
-        ffmpeg_exe,
-        "-i", stream_url,
-        "-c:a", "libmp3lame",
-        "-b:a", "192k",
-        "-f", "mp3",
-        "-"
-    ]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-
-    def iter_audio():
-        print(f"[Ember Stream] Audio streaming started -> sending bytes to client...")
+    # If not cached yet, download via yt-dlp + ffmpeg to cache_file
+    if not cache_file.exists() or cache_file.stat().st_size < 1024:
+        print(f"[Ember Stream] Track not cached yet. Caching to {cache_file}...")
+        ffmpeg_exe, ffmpeg_location = get_ffmpeg_details()
+        ydl_opts = {
+            "format": "bestaudio",
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "outtmpl": str(cache_dir / f"{video_id}.%(ext)s"),
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+            "ffmpeg_location": ffmpeg_location,
+        }
         try:
-            while True:
-                chunk = process.stdout.read(65536)
-                if not chunk:
-                    break
-                yield chunk
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            print(f"[Ember Stream] Cached audio stream successfully: {cache_file}")
         except Exception as e:
-            print(f"[Ember Stream] Stream disconnected or ended: {e}")
-        finally:
-            process.kill()
+            print(f"[Ember Stream ERROR] Failed to cache stream: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to load audio stream: {e}")
 
-    headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Cross-Origin-Resource-Policy": "cross-origin",
-        "Cache-Control": "no-cache",
-    }
-    return StreamingResponse(iter_audio(), media_type="audio/mpeg", headers=headers)
+    if not cache_file.exists():
+        raise HTTPException(status_code=404, detail="Stream file could not be cached")
+
+    print(f"[Ember Stream] Serving cached MP3 ({cache_file.stat().st_size} bytes) with full Range support...")
+    return FileResponse(
+        path=str(cache_file),
+        filename=f"{video_id}.mp3",
+        media_type="audio/mpeg",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        },
+    )
 
 
 @router.get("/audio/stream_normalized")
@@ -1212,87 +1220,10 @@ def stream_normalized_audio(
     duration: Optional[int] = Query(0),
 ):
     """
-    Stream audio through an on-the-fly FFmpeg EBU R128 loudness normalization filter.
-    Guarantees balanced volume (-14 LUFS target) across all tracks.
-    Automatically resolves Spotify URLs to ISRC-matched YouTube streams.
+    Stream audio to SvelteKit via disk-cached FileResponse (using stream_remote_audio cache).
+    Bypasses Linux WebKitGTK/GStreamer chunked HTTP stream incompatibilities.
     """
-    import subprocess
-    import yt_dlp
-    from fastapi.responses import StreamingResponse
-    from core.utils import get_ffmpeg_details
-
-    if "spotify.com" in url or "spotify:" in url:
-        from core.models import Track
-        from core.pipeline import best
-        from core.parser import InputParser
-
-        match_url = None
-        if title and artist:
-            artists_list = [a.strip() for a in artist.split(",") if a.strip()]
-            t = Track(
-                title=title,
-                artists=artists_list,
-                album=None,
-                duration=duration or 0,
-                track_number=None,
-                total_tracks=None,
-                year=None,
-                genre=None,
-                cover_url=None,
-                spotify_url=url,
-                isrc=isrc,
-                source="spotify",
-            )
-            m = best(t)
-            match_url = _get_candidate_url(m)
-        if not match_url:
-            items = InputParser.parse(url)
-            if items:
-                m = best(items[0])
-                match_url = _get_candidate_url(m)
-        if match_url:
-            print(f"[Ember Stream] Resolved Spotify track '{title or url}' -> {match_url}")
-            url = match_url
-        else:
-            raise HTTPException(status_code=404, detail="Could not resolve YouTube match for Spotify track")
-
-    ffmpeg_exe, _ = get_ffmpeg_details()
-    ydl_opts = {"format": "bestaudio", "quiet": True, "noplaylist": True}
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        stream_url = info.get("url")
-
-    if not stream_url:
-        raise HTTPException(status_code=404, detail="Could not resolve stream URL")
-
-    cmd = [
-        ffmpeg_exe,
-        "-i", stream_url,
-        "-af", "loudnorm=I=-14:LRA=11:TP=-1.5",
-        "-c:a", "libmp3lame",
-        "-b:a", "192k",
-        "-f", "mp3",
-        "-"
-    ]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-
-    def iter_audio():
-        try:
-            while True:
-                chunk = process.stdout.read(65536)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            process.kill()
-
-    headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Cross-Origin-Resource-Policy": "cross-origin",
-        "Cache-Control": "no-cache",
-    }
-    return StreamingResponse(iter_audio(), media_type="audio/mpeg", headers=headers)
+    return stream_remote_audio(url=url, title=title, artist=artist, isrc=isrc, duration=duration)
 
 
 @router.get("/audio/local_stream")
