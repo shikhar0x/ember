@@ -134,3 +134,10 @@ class InspectResponse(BaseModel):
     cover_url: Optional[str] = None
     total_tracks: Optional[int] = None
     tracks: Optional[list[TrackInfoResponse]] = None
+
+
+class PromoteCacheRequest(BaseModel):
+    """Promote a temporarily cached stream file into a fully tagged permanent library download."""
+    cache_file_path: str
+    track: TrackSchema
+    output_format: str = "mp3"

@@ -4,6 +4,35 @@
   import { openUrl, openPath } from '@tauri-apps/plugin-opener';
   import { fade, fly, scale, crossfade, slide } from 'svelte/transition';
   import { quintOut, cubicOut, backOut } from 'svelte/easing';
+  import MediaPlayer from '$lib/MediaPlayer.svelte';
+
+  let activePlayTrack: any = null;
+  let activeAudioUrl: string = "";
+  let activePlayIndex: number = -1;
+
+  function playTrackItem(t: any, idx: number, e: MouseEvent) {
+    e.stopPropagation();
+    activePlayTrack = t;
+    activePlayIndex = idx;
+    if (t.local_file_path || t.path) {
+      const path = t.local_file_path || t.path;
+      activeAudioUrl = `http://127.0.0.1:8008/audio/local_stream?file_path=${encodeURIComponent(path)}`;
+    } else {
+      const targetUrl = t.spotify_url || t.url || url;
+      const titleParam = encodeURIComponent(t.title || "");
+      const artistParam = encodeURIComponent(t.artists?.join(",") || "");
+      const isrcParam = encodeURIComponent(t.isrc || "");
+      const durParam = t.duration || 0;
+      activeAudioUrl = `http://127.0.0.1:8008/audio/stream?url=${encodeURIComponent(targetUrl)}&title=${titleParam}&artist=${artistParam}&isrc=${isrcParam}&duration=${durParam}`;
+    }
+    console.log("[Ember UI] ▶ Play button clicked! Loading stream URL:", activeAudioUrl);
+  }
+
+  function handleSaveToLibrary() {
+    if (!activePlayTrack) return;
+    track = activePlayTrack;
+    startDownloadWithPairing(false);
+  }
 
   async function minimizeWindow() {
     if (isTauri()) {
@@ -2388,8 +2417,16 @@
               <div class="divider"></div>
             </div>
           {:else if track}
-            <div class="meta-header">
-              <h2 class="track-title">{track.title}</h2>
+            <div class="meta-header" style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
+              <h2 class="track-title" style="margin: 0;">{track.title}</h2>
+              <button
+                type="button"
+                class="single-play-btn"
+                title="Play stream"
+                onclick={(e) => playTrackItem(track, 0, e)}
+              >
+                ▶ Play Stream
+              </button>
             </div>
             <div class="meta-top">
               <p class="track-artist">{track.artists.length > 1 ? track.artists.slice(0,-1).join(', ') + ' & ' + track.artists.at(-1) : track.artists[0]}</p>
@@ -2561,6 +2598,15 @@
                           </div>
                         {/if}
                       </div>
+                      <button
+                        type="button"
+                        class="single-play-btn"
+                        style="height: 48px; padding: 0 1.5rem; font-size: 0.95rem; margin-left: 0.5rem;"
+                        title="Play stream"
+                        onclick={(e) => playTrackItem(track, 0, e)}
+                      >
+                        ▶ Play Stream
+                      </button>
                       <button class="dl-btn" onclick={() => startDownloadWithPairing(false)} disabled={isDownloading || (pairedUrl.trim() !== '' && !isPairingAccepted && !isFetchingPreview)} class:downloading={isDownloading}>
                         <span class="btn-text">{isDownloading ? "Downloading..." : "Download"}</span>
                         <div class="btn-glow"></div>
@@ -2620,6 +2666,15 @@
                           </div>
                         {/if}
                       </div>
+                      <button
+                        type="button"
+                        class="single-play-btn"
+                        style="height: 48px; padding: 0 1.5rem; font-size: 0.95rem; margin-right: 0.5rem;"
+                        title="Play stream"
+                        onclick={(e) => playTrackItem(track, 0, e)}
+                      >
+                        ▶ Play Stream
+                      </button>
                       <button class="dl-btn" onclick={() => startDownloadWithPairing(false)} disabled={isDownloading} class:downloading={isDownloading}>
                         <span class="btn-text">{isDownloading ? "Downloading..." : "Download"}</span>
                         <div class="btn-glow"></div>
@@ -2692,6 +2747,16 @@
                     <span class="track-row-title">{t.title}</span>
                     <span class="track-row-artist">{t.artists?.join(', ') || 'Unknown'}{#if t.year} • {t.year}{/if}</span>
                   </div>
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="track-play-btn"
+                    title="Play track"
+                    onclick={(e) => playTrackItem(t, i, e)}
+                    onkeydown={(e) => e.key === 'Enter' && playTrackItem(t, i, e as any)}
+                  >
+                    ▶
+                  </span>
                   <span class="track-dur">{t.duration != null && t.duration > 0 ? formatDuration(t.duration) : ''}</span>
                 </button>
                 {:else}
@@ -2817,7 +2882,35 @@
   {/each}
 </div>
 
+{#if activePlayTrack}
+  <MediaPlayer
+    currentTrackTitle={activePlayTrack.title || "Unknown"}
+    currentArtist={activePlayTrack.artists?.join(', ') || "Unknown"}
+    currentCoverUrl={activePlayTrack.cover_url || playlistCover || "/favicon.png"}
+    audioUrl={activeAudioUrl}
+    isLocal={Boolean(activePlayTrack.local_file_path || activePlayTrack.path)}
+    onSaveToLibrary={handleSaveToLibrary}
+  />
+{/if}
+
 <style>
+  .track-play-btn {
+    background: transparent;
+    border: none;
+    color: #e11d2e;
+    font-size: 0.95rem;
+    cursor: pointer;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+    opacity: 0.85;
+    transition: all 0.2s ease;
+  }
+  .track-play-btn:hover {
+    opacity: 1;
+    background: rgba(225, 29, 46, 0.15);
+    transform: scale(1.15);
+  }
+
   :global(*) {
     user-select: none;
     -webkit-user-select: none;

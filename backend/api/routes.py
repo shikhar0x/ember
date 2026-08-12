@@ -12,6 +12,7 @@ from __future__ import annotations
 import traceback
 import base64
 import concurrent.futures
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -29,6 +30,7 @@ from api.schemas import (
     TrackInfoResponse,
     InspectResponse,
     TrackSchema,
+    PromoteCacheRequest,
 )
 from core.models import Track
 
@@ -1072,4 +1074,293 @@ def enrich_track(track_data: TrackSchema):
         source=t.source,
         media_type=t.media_type
     )
+
+
+def _get_candidate_url(m) -> Optional[str]:
+    if not m:
+        return None
+    vid = getattr(m, "video_id", None) or getattr(m, "url", None)
+    if not vid:
+        return None
+    if vid.startswith("http://") or vid.startswith("https://"):
+        return vid
+    return f"https://www.youtube.com/watch?v={vid}"
+
+
+@router.get("/audio/stream")
+def stream_remote_audio(
+    url: str = Query(...),
+    title: Optional[str] = Query(None),
+    artist: Optional[str] = Query(None),
+    isrc: Optional[str] = Query(None),
+    duration: Optional[int] = Query(0),
+    request: Request = None,
+):
+    """
+    Proxy an audio stream from YouTube/YouTube Music to SvelteKit via FFmpeg MP3 encoding.
+    Bypasses Linux WebKitGTK/GStreamer 'fakevideosink' container errors by serving clean audio/mpeg.
+    Automatically resolves Spotify URLs to ISRC-matched YouTube streams.
+    """
+    import subprocess
+    import yt_dlp
+    from fastapi import Request
+    from fastapi.responses import StreamingResponse
+    from core.utils import get_ffmpeg_details
+
+    print(f"\n==============================================")
+    print(f"[Ember Stream] REQUEST RECEIVED:")
+    print(f"  URL:      {url}")
+    print(f"  Title:    {title}")
+    print(f"  Artist:   {artist}")
+    print(f"  ISRC:     {isrc}")
+    print(f"==============================================")
+
+    if "spotify.com" in url or "spotify:" in url:
+        from core.models import Track
+        from core.pipeline import best
+        from core.parser import InputParser
+
+        match_url = None
+        if title and artist:
+            artists_list = [a.strip() for a in artist.split(",") if a.strip()]
+            t = Track(
+                title=title,
+                artists=artists_list,
+                isrc=isrc,
+                duration=duration or 0,
+                spotify_url=url,
+                source="spotify",
+            )
+            m = best(t)
+            match_url = _get_candidate_url(m)
+            print(f"[Ember Stream] Track match candidate: {m} -> {match_url}")
+        if not match_url:
+            items = InputParser.parse(url)
+            if items:
+                m = best(items[0])
+                match_url = _get_candidate_url(m)
+                print(f"[Ember Stream] Parsed URL match candidate: {m} -> {match_url}")
+        if match_url:
+            print(f"[Ember Stream] Resolved Spotify track '{title or url}' -> {match_url}")
+            url = match_url
+        else:
+            print(f"[Ember Stream ERROR] Could not resolve YouTube match for Spotify track '{title or url}'")
+            raise HTTPException(status_code=404, detail="Could not resolve YouTube match for Spotify track")
+
+    ffmpeg_exe, _ = get_ffmpeg_details()
+    ydl_opts = {"format": "bestaudio", "quiet": True, "noplaylist": True}
+
+    print(f"[Ember Stream] Running yt-dlp to extract audio stream for: {url}")
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            stream_url = info.get("url")
+    except Exception as e:
+        print(f"[Ember Stream ERROR] yt-dlp extraction failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to resolve audio stream: {e}")
+
+    if not stream_url:
+        print(f"[Ember Stream ERROR] No stream URL found for: {url}")
+        raise HTTPException(status_code=404, detail="No stream URL found")
+
+    print(f"[Ember Stream] yt-dlp resolved stream! URL: {stream_url[:75]}...")
+    print(f"[Ember Stream] Spawning FFmpeg MP3 encoding pipeline...")
+
+    cmd = [
+        ffmpeg_exe, "-re",
+        "-i", stream_url,
+        "-c:a", "libmp3lame",
+        "-b:a", "192k",
+        "-f", "mp3",
+        "-"
+    ]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def iter_audio():
+        print(f"[Ember Stream] Audio streaming started -> sending bytes to client...")
+        try:
+            while True:
+                chunk = process.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        except Exception as e:
+            print(f"[Ember Stream] Stream disconnected or ended: {e}")
+        finally:
+            process.kill()
+
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Cross-Origin-Resource-Policy": "cross-origin",
+        "Cache-Control": "no-cache",
+    }
+    return StreamingResponse(iter_audio(), media_type="audio/mpeg", headers=headers)
+
+
+@router.get("/audio/stream_normalized")
+def stream_normalized_audio(
+    url: str = Query(...),
+    title: Optional[str] = Query(None),
+    artist: Optional[str] = Query(None),
+    isrc: Optional[str] = Query(None),
+    duration: Optional[int] = Query(0),
+):
+    """
+    Stream audio through an on-the-fly FFmpeg EBU R128 loudness normalization filter.
+    Guarantees balanced volume (-14 LUFS target) across all tracks.
+    Automatically resolves Spotify URLs to ISRC-matched YouTube streams.
+    """
+    import subprocess
+    import yt_dlp
+    from fastapi.responses import StreamingResponse
+    from core.utils import get_ffmpeg_details
+
+    if "spotify.com" in url or "spotify:" in url:
+        from core.models import Track
+        from core.pipeline import best
+        from core.parser import InputParser
+
+        match_url = None
+        if title and artist:
+            artists_list = [a.strip() for a in artist.split(",") if a.strip()]
+            t = Track(
+                title=title,
+                artists=artists_list,
+                isrc=isrc,
+                duration=duration or 0,
+                spotify_url=url,
+                source="spotify",
+            )
+            m = best(t)
+            match_url = _get_candidate_url(m)
+        if not match_url:
+            items = InputParser.parse(url)
+            if items:
+                m = best(items[0])
+                match_url = _get_candidate_url(m)
+        if match_url:
+            print(f"[Ember Stream] Resolved Spotify track '{title or url}' -> {match_url}")
+            url = match_url
+        else:
+            raise HTTPException(status_code=404, detail="Could not resolve YouTube match for Spotify track")
+
+    ffmpeg_exe, _ = get_ffmpeg_details()
+    ydl_opts = {"format": "bestaudio", "quiet": True, "noplaylist": True}
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        stream_url = info.get("url")
+
+    if not stream_url:
+        raise HTTPException(status_code=404, detail="Could not resolve stream URL")
+
+    cmd = [
+        ffmpeg_exe, "-re",
+        "-i", stream_url,
+        "-af", "loudnorm=I=-14:LRA=11:TP=-1.5",
+        "-c:a", "libmp3lame",
+        "-b:a", "192k",
+        "-f", "mp3",
+        "-"
+    ]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def iter_audio():
+        try:
+            while True:
+                chunk = process.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            process.kill()
+
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Cross-Origin-Resource-Policy": "cross-origin",
+        "Cache-Control": "no-cache",
+    }
+    return StreamingResponse(iter_audio(), media_type="audio/mpeg", headers=headers)
+
+
+@router.get("/audio/local_stream")
+def play_local_stream_file(file_path: str = Query(...)):
+    """
+    Serve a local audio file from disk with Range request and CORS support.
+    Allows SvelteKit and Web Audio API to play and analyze local files without taint errors.
+    """
+    import os
+    from fastapi.responses import FileResponse
+
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Local audio file not found")
+
+    ext = os.path.splitext(file_path)[1].lower()
+    media_types = {
+        ".mp3": "audio/mpeg",
+        ".flac": "audio/flac",
+        ".m4a": "audio/mp4",
+        ".ogg": "audio/ogg",
+        ".opus": "audio/ogg",
+        ".wav": "audio/wav",
+    }
+    media_type = media_types.get(ext, "application/octet-stream")
+
+    return FileResponse(
+        path=file_path,
+        filename=os.path.basename(file_path),
+        media_type=media_type,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Accept-Ranges": "bytes",
+        },
+    )
+
+
+@router.post("/audio/promote_cache")
+def promote_cache_to_library(req: PromoteCacheRequest):
+    """
+    Promote a temporarily cached stream file into a fully tagged permanent library download.
+    """
+    import shutil
+    from pathlib import Path
+    from core.tagger import tag_audio
+    from core.http_helper import get_bytes
+    from core.utils import sanitize_filename as core_sanitize
+
+    cache_path = Path(req.cache_file_path)
+    if not cache_path.exists():
+        raise HTTPException(status_code=404, detail="Cache file expired or not found")
+
+    t = _track_from_schema(req.track)
+    artist_str = ", ".join(t.artists) if t.artists else "Unknown"
+    safe_name = core_sanitize(f"{t.title} - {artist_str}")
+    out_path = Path(_controller.download_dir) / f"{safe_name}.{req.output_format}"
+
+    counter = 1
+    while out_path.exists():
+        out_path = Path(_controller.download_dir) / f"{safe_name} ({counter}).{req.output_format}"
+        counter += 1
+
+    try:
+        shutil.copy2(cache_path, out_path)
+        
+        cover_bytes = None
+        if t.cover_url:
+            try:
+                cover_bytes = get_bytes(t.cover_url, timeout=10)
+            except Exception:
+                pass
+
+        tag_audio(t, str(out_path), cover_bytes)
+        
+        return {
+            "status": "ok",
+            "path": str(out_path),
+            "message": f"Successfully added '{t.title}' to library",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
