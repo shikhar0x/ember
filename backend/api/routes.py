@@ -1126,9 +1126,15 @@ def stream_remote_audio(
             t = Track(
                 title=title,
                 artists=artists_list,
-                isrc=isrc,
+                album=None,
                 duration=duration or 0,
+                track_number=None,
+                total_tracks=None,
+                year=None,
+                genre=None,
+                cover_url=None,
                 spotify_url=url,
+                isrc=isrc,
                 source="spotify",
             )
             m = best(t)
@@ -1226,9 +1232,15 @@ def stream_normalized_audio(
             t = Track(
                 title=title,
                 artists=artists_list,
-                isrc=isrc,
+                album=None,
                 duration=duration or 0,
+                track_number=None,
+                total_tracks=None,
+                year=None,
+                genre=None,
+                cover_url=None,
                 spotify_url=url,
+                isrc=isrc,
                 source="spotify",
             )
             m = best(t)
