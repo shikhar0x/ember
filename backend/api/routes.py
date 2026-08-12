@@ -1173,7 +1173,7 @@ def stream_remote_audio(
     print(f"[Ember Stream] Spawning FFmpeg MP3 encoding pipeline...")
 
     cmd = [
-        ffmpeg_exe, "-re",
+        ffmpeg_exe,
         "-i", stream_url,
         "-c:a", "libmp3lame",
         "-b:a", "192k",
@@ -1267,7 +1267,7 @@ def stream_normalized_audio(
         raise HTTPException(status_code=404, detail="Could not resolve stream URL")
 
     cmd = [
-        ffmpeg_exe, "-re",
+        ffmpeg_exe,
         "-i", stream_url,
         "-af", "loudnorm=I=-14:LRA=11:TP=-1.5",
         "-c:a", "libmp3lame",
