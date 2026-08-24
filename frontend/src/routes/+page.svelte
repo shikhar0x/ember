@@ -10,6 +10,127 @@
   let activeAudioUrl: string = "";
   let activePlayIndex: number = -1;
 
+  let cardAudioElement: HTMLAudioElement | null = null;
+  let cardAudioUrl = "";
+  let cardAudioTrackId = "";
+  let cardAudioPlaying = false;
+  let cardAudioLoading = false;
+  let cardAudioTime = 0;
+  let cardAudioDuration = 0;
+  let cardAudioVolume = 1.0;
+  let cardAudioMuted = false;
+
+  function toggleCardAudio() {
+    if (!track) return;
+
+    const t = track as any;
+    const currentTrackId = t.id || t.spotify_url || t.url || t.title;
+    if (cardAudioTrackId !== currentTrackId || !cardAudioUrl) {
+      cardAudioTrackId = currentTrackId;
+      cardAudioTime = 0;
+      cardAudioDuration = 0;
+      if (t.local_file_path || t.path) {
+        const path = t.local_file_path || t.path;
+        cardAudioUrl = `http://127.0.0.1:8008/audio/local_stream?file_path=${encodeURIComponent(path)}`;
+      } else {
+        const targetUrl = t.spotify_url || t.url || url;
+        const titleParam = encodeURIComponent(t.title || "");
+        const artistParam = encodeURIComponent(t.artists?.join(",") || "");
+        const isrcParam = encodeURIComponent(t.isrc || "");
+        const durParam = t.duration || 0;
+        cardAudioUrl = `http://127.0.0.1:8008/audio/stream?url=${encodeURIComponent(targetUrl)}&title=${titleParam}&artist=${artistParam}&isrc=${isrcParam}&duration=${durParam}`;
+      }
+    }
+
+    if (!cardAudioElement) return;
+
+    if (cardAudioPlaying) {
+      cardAudioLoading = false;
+      cardAudioPlaying = false;
+      cardAudioElement.pause();
+    } else {
+      if (cardAudioTime === 0 || !cardAudioElement.currentTime) {
+        cardAudioLoading = true;
+        cardAudioPlaying = false;
+      }
+      cardAudioElement.play().catch((err) => {
+        console.error("[Ember UI] Stream playback error:", err);
+        cardAudioLoading = false;
+        cardAudioPlaying = false;
+      });
+    }
+  }
+
+  function handleCardSeek(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const val = parseFloat(input.value);
+    cardAudioTime = val;
+    if (cardAudioElement) {
+      cardAudioElement.currentTime = val;
+    }
+  }
+
+  function toggleCardMute() {
+    if (!cardAudioElement) return;
+    cardAudioMuted = !cardAudioMuted;
+    cardAudioElement.muted = cardAudioMuted;
+  }
+
+  function formatPaddedTime(sec: number): string {
+    if (isNaN(sec) || !isFinite(sec) || sec <= 0) return "00:00";
+    const mins = Math.floor(sec / 60);
+    const secs = Math.floor(sec % 60);
+    const mStr = mins < 10 ? `0${mins}` : `${mins}`;
+    const sStr = secs < 10 ? `0${secs}` : `${secs}`;
+    return `${mStr}:${sStr}`;
+  }
+
+  function handleCardVolumeChange(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const val = parseFloat(input.value);
+    cardAudioVolume = val;
+    cardAudioMuted = val === 0;
+    if (cardAudioElement) {
+      cardAudioElement.volume = val;
+      cardAudioElement.muted = cardAudioMuted;
+    }
+  }
+
+  let isDraggingVolume = false;
+
+  function updateVolumeFromMouse(e: MouseEvent, target: HTMLElement) {
+    const rect = target.getBoundingClientRect();
+    const offsetY = rect.bottom - e.clientY;
+    const ratio = Math.max(0, Math.min(1, offsetY / rect.height));
+    cardAudioVolume = ratio;
+    cardAudioMuted = ratio === 0;
+    if (cardAudioElement) {
+      cardAudioElement.volume = ratio;
+      cardAudioElement.muted = cardAudioMuted;
+    }
+  }
+
+  function handleVolumeMouseDown(e: MouseEvent) {
+    isDraggingVolume = true;
+    const target = e.currentTarget as HTMLElement;
+    updateVolumeFromMouse(e, target);
+
+    const onMouseMove = (moveEv: MouseEvent) => {
+      if (isDraggingVolume) {
+        updateVolumeFromMouse(moveEv, target);
+      }
+    };
+
+    const onMouseUp = () => {
+      isDraggingVolume = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }
+
   function playTrackItem(t: any, idx: number, e: MouseEvent) {
     e.stopPropagation();
     activePlayTrack = t;
@@ -2417,16 +2538,8 @@
               <div class="divider"></div>
             </div>
           {:else if track}
-            <div class="meta-header" style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
-              <h2 class="track-title" style="margin: 0;">{track.title}</h2>
-              <button
-                type="button"
-                class="single-play-btn"
-                title="Play stream"
-                onclick={(e) => playTrackItem(track, 0, e)}
-              >
-                ▶ Play Stream
-              </button>
+            <div class="meta-header">
+              <h2 class="track-title">{track.title}</h2>
             </div>
             <div class="meta-top">
               <p class="track-artist">{track.artists.length > 1 ? track.artists.slice(0,-1).join(', ') + ' & ' + track.artists.at(-1) : track.artists[0]}</p>
@@ -2441,6 +2554,144 @@
               </div>
             </div>
             <div class="meta-bottom">
+              <!-- Inline Audio Stream Player Bar -->
+              <div class="card-player-bar">
+                <audio
+                  bind:this={cardAudioElement}
+                  src={cardAudioUrl}
+                  onplay={() => {
+                    if (cardAudioTime === 0 || !cardAudioElement?.currentTime) {
+                      cardAudioLoading = true;
+                      cardAudioPlaying = false;
+                    }
+                  }}
+                  onplaying={() => { cardAudioPlaying = true; cardAudioLoading = false; }}
+                  ontimeupdate={() => {
+                    if (cardAudioElement) {
+                      cardAudioTime = cardAudioElement.currentTime;
+                      if (!cardAudioElement.paused && !cardAudioElement.ended) {
+                        cardAudioPlaying = true;
+                        cardAudioLoading = false;
+                      }
+                    }
+                  }}
+                  onpause={() => { cardAudioPlaying = false; cardAudioLoading = false; }}
+                  onended={() => { cardAudioPlaying = false; cardAudioLoading = false; cardAudioTime = 0; }}
+                  onerror={() => { cardAudioLoading = false; cardAudioPlaying = false; }}
+                ></audio>
+
+                <button
+                  type="button"
+                  class="card-play-btn"
+                  class:playing={cardAudioPlaying}
+                  class:loading={cardAudioLoading}
+                  onclick={toggleCardAudio}
+                  title={cardAudioPlaying ? "Pause stream" : "Play stream"}
+                >
+                  {#if cardAudioLoading}
+                    <svg class="card-spinner-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <circle cx="12" cy="12" r="9" stroke-dasharray="32" stroke-dashoffset="12"/>
+                    </svg>
+                  {:else if cardAudioPlaying}
+                    <svg class="pause-svg" viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="6" y="5" width="4" height="14" rx="2" />
+                      <rect x="14" y="5" width="4" height="14" rx="2" />
+                    </svg>
+                  {:else}
+                    <svg class="play-svg" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 6.82v10.36c0 .79.87 1.27 1.54.84l8.14-5.18c.62-.39.62-1.29 0-1.69L9.54 5.98C8.87 5.55 8 6.03 8 6.82z"/>
+                    </svg>
+                  {/if}
+                </button>
+
+                <div class="card-player-timeline" class:active-playing={cardAudioPlaying}>
+                  <div
+                    class="timeline-glass-fill"
+                    style="width: {(cardAudioDuration || (track as any)?.duration) ? Math.min(100, Math.max(0, (cardAudioTime / (cardAudioDuration || (track as any)?.duration || 1)) * 100)).toFixed(1) : 0}%"
+                  ></div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={cardAudioDuration || (track as any)?.duration || 100}
+                    step="0.1"
+                    value={cardAudioTime}
+                    oninput={handleCardSeek}
+                    class="card-seek-slider"
+                    aria-label="Seek stream position"
+                  />
+                </div>
+
+                <div class="card-player-info">
+                  <span class="card-player-time font-mono">
+                    {formatPaddedTime(cardAudioTime)}/{formatPaddedTime(cardAudioDuration || (track as any)?.duration || 0)}
+                  </span>
+                </div>
+
+                {#if cardAudioPlaying}
+                  <div class="card-mini-visualizer" title="Playing stream">
+                    <span class="bar bar-1"></span>
+                    <span class="bar bar-2"></span>
+                    <span class="bar bar-3"></span>
+                    <span class="bar bar-4"></span>
+                  </div>
+                {/if}
+
+                <div class="card-volume-control" data-no-drag>
+                  <button
+                    type="button"
+                    class="card-vol-btn"
+                    onclick={toggleCardMute}
+                    data-no-drag
+                  >
+                    {#if cardAudioMuted || cardAudioVolume === 0}
+                      <svg class="vol-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                        <line x1="23" y1="9" x2="17" y2="15"/>
+                        <line x1="17" y1="9" x2="23" y2="15"/>
+                      </svg>
+                    {:else if cardAudioVolume < 0.5}
+                      <svg class="vol-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                      </svg>
+                    {:else}
+                      <svg class="vol-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                      </svg>
+                    {/if}
+                  </button>
+
+                  <div class="vertical-volume-popover" data-no-drag>
+                    <span class="vol-percent-text">{Math.round((cardAudioMuted ? 0 : cardAudioVolume) * 100)}%</span>
+                    <div
+                      class="vertical-slider-track"
+                      onmousedown={handleVolumeMouseDown}
+                      role="slider"
+                      aria-valuenow={Math.round((cardAudioMuted ? 0 : cardAudioVolume) * 100)}
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      tabindex="0"
+                      data-no-drag
+                    >
+                      <div
+                        class="vertical-volume-fill"
+                        style="height: {(cardAudioMuted ? 0 : cardAudioVolume * 100).toFixed(1)}%"
+                      ></div>
+                      <div
+                        class="vertical-volume-thumb"
+                        style="bottom: {(cardAudioMuted ? 0 : cardAudioVolume * 100).toFixed(1)}%"
+                      >
+                        <svg class="thumb-glass-icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <line x1="3" y1="6" x2="9" y2="6" stroke-linecap="round"/>
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div class="divider"></div>
               <div class="progress-row">
                 <div class="progress-track">
@@ -2598,15 +2849,6 @@
                           </div>
                         {/if}
                       </div>
-                      <button
-                        type="button"
-                        class="single-play-btn"
-                        style="height: 48px; padding: 0 1.5rem; font-size: 0.95rem; margin-left: 0.5rem;"
-                        title="Play stream"
-                        onclick={(e) => playTrackItem(track, 0, e)}
-                      >
-                        ▶ Play Stream
-                      </button>
                       <button class="dl-btn" onclick={() => startDownloadWithPairing(false)} disabled={isDownloading || (pairedUrl.trim() !== '' && !isPairingAccepted && !isFetchingPreview)} class:downloading={isDownloading}>
                         <span class="btn-text">{isDownloading ? "Downloading..." : "Download"}</span>
                         <div class="btn-glow"></div>
@@ -2666,15 +2908,6 @@
                           </div>
                         {/if}
                       </div>
-                      <button
-                        type="button"
-                        class="single-play-btn"
-                        style="height: 48px; padding: 0 1.5rem; font-size: 0.95rem; margin-right: 0.5rem;"
-                        title="Play stream"
-                        onclick={(e) => playTrackItem(track, 0, e)}
-                      >
-                        ▶ Play Stream
-                      </button>
                       <button class="dl-btn" onclick={() => startDownloadWithPairing(false)} disabled={isDownloading} class:downloading={isDownloading}>
                         <span class="btn-text">{isDownloading ? "Downloading..." : "Download"}</span>
                         <div class="btn-glow"></div>
@@ -6470,11 +6703,333 @@
     cursor: pointer;
     transition: background 0.2s;
   }
-  .custom-dropdown-item:hover {
+  /* Inline Card Media Player Bar */
+  .card-player-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.85rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      0 4px 20px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(16px);
+    transition: all 0.25s ease;
+    margin-bottom: 0.25rem;
+  }
+  .card-player-bar:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  .card-play-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 2px 8px rgba(0, 0, 0, 0.2);
+    transition: all 0.2s ease;
+    padding: 0;
+  }
+  .card-play-btn:hover {
     background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+  }
+  .card-play-btn.playing {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+  }
+  .card-play-btn .play-svg {
+    width: 18px;
+    height: 18px;
+    margin-left: 2px;
+  }
+  .card-play-btn .pause-svg {
+    width: 18px;
+    height: 18px;
+  }
+  .card-play-btn .card-spinner-svg {
+    width: 18px;
+    height: 18px;
+    animation: cardSpin 0.9s linear infinite;
+  }
+  @keyframes cardSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .card-player-timeline {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 16px;
+    padding: 0 1px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 99px;
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.4),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+      0 2px 6px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+    transition: all 0.25s ease;
+  }
+  .card-player-timeline.active-playing {
+    border-color: rgba(255, 94, 98, 0.35);
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.4),
+      0 0 12px rgba(255, 94, 98, 0.2);
+  }
+  .timeline-glass-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    border-radius: 99px;
+    background: linear-gradient(90deg, rgba(225, 29, 46, 0.85) 0%, rgba(255, 94, 98, 0.95) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      0 0 10px rgba(255, 94, 98, 0.5);
+    pointer-events: none;
+    transition: width 0.1s linear;
+  }
+  .card-seek-slider {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 2;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    border-radius: 99px;
+    outline: none;
+    cursor: pointer;
+    margin: 0;
+    padding: 0;
+  }
+  .card-seek-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #ffffff 0%, #e6e6e6 60%, #d4d4d4 100%);
+    border: 1.5px solid rgba(255, 255, 255, 0.95);
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.5),
+      0 0 10px rgba(255, 94, 98, 0.8),
+      inset 0 1px 1px rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .card-seek-slider::-webkit-slider-thumb:hover {
+    background: #ffffff;
+    box-shadow:
+      0 3px 12px rgba(0, 0, 0, 0.6),
+      0 0 14px rgba(255, 94, 98, 0.95),
+      inset 0 1px 1px #ffffff;
+  }
+
+  .card-player-info {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .card-player-time {
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.95);
+    background: rgba(0, 0, 0, 0.25);
+    padding: 0.25rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .card-mini-visualizer {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 16px;
+    flex-shrink: 0;
+    padding: 0 4px;
+  }
+  .card-mini-visualizer .bar {
+    width: 3px;
+    background: linear-gradient(to top, #ff5e62, #ff9966);
+    border-radius: 99px;
+    animation: miniVizBounce 0.8s ease-in-out infinite alternate;
+  }
+  .card-mini-visualizer .bar-1 { height: 40%; animation-delay: 0.1s; }
+  .card-mini-visualizer .bar-2 { height: 80%; animation-delay: 0.3s; }
+  .card-mini-visualizer .bar-3 { height: 60%; animation-delay: 0.2s; }
+  .card-mini-visualizer .bar-4 { height: 100%; animation-delay: 0.4s; }
+
+  @keyframes miniVizBounce {
+    0% { height: 20%; }
+    100% { height: 100%; }
+  }
+
+  .card-volume-control {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    backdrop-filter: blur(8px);
+    transition: all 0.2s ease;
+    -webkit-app-region: no-drag !important;
+  }
+  .card-volume-control:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+
+  .card-vol-btn {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    opacity: 0.9;
+    transition: opacity 0.2s ease, transform 0.2s ease, color 0.2s ease;
+    padding: 0;
+    -webkit-app-region: no-drag !important;
+  }
+  .card-vol-btn:hover {
+    opacity: 1;
     color: #fff;
-    box-shadow: none !important;
-    transform: none !important;
+  }
+  .card-vol-btn .vol-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .vertical-volume-popover {
+    position: absolute;
+    bottom: calc(100% + 11px);
+    left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    background: rgba(18, 20, 26, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 14px;
+    padding: 0.65rem 0.3rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow:
+      0 12px 36px rgba(0, 0, 0, 0.7),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(20px);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.2s;
+    z-index: 999;
+    width: 36px;
+    cursor: default;
+    -webkit-app-region: no-drag !important;
+  }
+  /* Extended 6px hover hit-box and window drag protection zone */
+  .vertical-volume-popover::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    bottom: -20px;
+    left: -6px;
+    right: -6px;
+    z-index: -1;
+    background: transparent;
+    border-radius: 18px;
+    pointer-events: auto;
+  }
+
+  .card-volume-control:hover .vertical-volume-popover,
+  .card-volume-control:focus-within .vertical-volume-popover {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  .vol-percent-text {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: monospace;
+    user-select: none;
+  }
+
+  .vertical-slider-track {
+    width: 14px;
+    height: 125px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 99px;
+    position: relative;
+    cursor: pointer;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+    overflow: visible;
+  }
+
+  .vertical-volume-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-radius: 99px;
+    background: linear-gradient(to top, #e11d2e 0%, #ff5e62 100%);
+    box-shadow: 0 0 8px rgba(255, 94, 98, 0.6);
+    pointer-events: none;
+  }
+
+  .vertical-volume-thumb {
+    position: absolute;
+    left: 50%;
+    transform: translate(-50%, 50%);
+    width: 18px;
+    height: 14px;
+    border-radius: 6px;
+    background: radial-gradient(circle at 35% 35%, #ffffff 0%, #e6e6e6 60%, #d4d4d4 100%);
+    border: 1.5px solid rgba(255, 255, 255, 0.95);
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.5),
+      0 0 10px rgba(255, 94, 98, 0.8),
+      inset 0 1px 1px rgba(255, 255, 255, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    transition: transform 0.1s ease, box-shadow 0.15s ease;
+  }
+  .vertical-volume-thumb .thumb-glass-icon {
+    width: 8px;
+    height: 8px;
+    color: #ff5e62;
   }
 
 </style>
