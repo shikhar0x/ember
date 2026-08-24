@@ -1,6 +1,6 @@
-# Ember × Metrolist: The Unified Desktop Music Studio Playbook
+# Ember: The Unified Desktop Music Studio Playbook
 
-This document is a comprehensive technical specification, architectural guide, and code implementation playbook for evolving **Ember** from an audio archival/download utility into a **Full-Featured Desktop Music Player & Curation Studio**—combining the best ideas of **Metrolist** (instant streaming, visual polish, time-synced lyrics, audio EQ/visualizers) with **Ember's core superpower** (ISRC-based precision matching, Apple Music/Spotify GraphQL metadata resolution, and permanent, DRM-free local file ownership).
+This document is a comprehensive technical specification, architectural guide, and code implementation playbook for evolving **Ember** from an audio archival/download utility into a **Full-Featured Desktop Music Player & Curation Studio**—combining instant streaming, visual polish, time-synced lyrics, audio EQ/visualizers with **Ember's core superpower** (ISRC-based precision matching, Apple Music/Spotify GraphQL metadata resolution, and permanent, DRM-free local file ownership).
 
 ---
 
@@ -24,7 +24,7 @@ This document is a comprehensive technical specification, architectural guide, a
 
 ## 1. Architecture & Philosophy: The Dual-Action Engine
 
-In a standard music downloader, you blindly download files before listening. In a standard streaming app (like Metrolist or Spotify), you can listen instantly but never truly own the underlying files.
+In a standard music downloader, you blindly download files before listening. In a standard streaming app (like Spotify), you can listen instantly but never truly own the underlying files.
 
 ### The Unified Dual-Action Model
 Every track row in Ember exposes two primary actions: **`[▶ Play]`** and **`[↓ Download / Save]`**:
@@ -157,7 +157,7 @@ def stream_remote_audio(url: str = Query(...), request: Request = None):
 
 ### 4.2 `GET /audio/stream_normalized` — Live FFmpeg Loudness Normalization Pipe
 
-To match Metrolist's **Loudness Normalization** feature, this endpoint pipes the YouTube stream through `ffmpeg` on the fly using EBU R128 (`loudnorm`) so tracks from different albums or uploads maintain a consistent volume level.
+To provide Ember's **Loudness Normalization** feature, this endpoint pipes the YouTube stream through `ffmpeg` on the fly using EBU R128 (`loudnorm`) so tracks from different albums or uploads maintain a consistent volume level.
 
 ```python
 @router.get("/audio/stream_normalized")
@@ -314,7 +314,7 @@ def promote_cache_to_library(req: PromoteCacheRequest):
 
 ## 5. Frontend Implementation: SvelteKit Media Player & Web Audio API
 
-To provide Metrolist-level visual polish and music style control ("the bars"), we use the browser's hardware-accelerated **Web Audio API** inside SvelteKit.
+To provide high-level visual polish and music style control ("the bars"), we use the browser's hardware-accelerated **Web Audio API** inside SvelteKit.
 
 ### 5.1 Web Audio API Engine
 *   **`AudioContext.createMediaElementSource(audio)`**: Taps into the `<audio>` output stream.
@@ -653,5 +653,5 @@ For each track row in your inspect/download table:
 ---
 
 ## Summary
-With this architecture, Ember bridges the divide between **transient mobile streaming apps** (Metrolist) and **offline archival tools**. Users get instant audio playback, interactive visualizer bars, and EQ music styling—backed by permanent, DRM-free local file ownership.
+With this architecture, Ember bridges the divide between **transient mobile streaming apps** and **offline archival tools**. Users get instant audio playback, interactive visualizer bars, and EQ music styling—backed by permanent, DRM-free local file ownership.
 
