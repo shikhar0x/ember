@@ -596,6 +596,8 @@ Save this file as `frontend/src/lib/MediaPlayer.svelte` and import it into your 
 
 ---
 
+---
+
 ## 6. Step-by-Step Integration Guide
 
 ### Phase 1: Mount the Backend Routes
@@ -618,5 +620,38 @@ For each track row in your inspect/download table:
 
 ---
 
+## 7. Inline Glass Media Player Bar & UI Specification
+
+### 7.1 Layout & Glass Design System
+- **Placement**: Integrated inside `.meta-bottom` directly above the card section separator (`<div class="divider"></div>`).
+- **Glass Aesthetics**: Uses a translucent dark glass frame (`background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px`).
+
+### 7.2 Monochrome Dark Glass Play/Pause Button
+- **Colorless Finish**: Completely monochrome dark glass button (`background: rgba(0, 0, 0, 0.25)`), free of red/orange gradient tints.
+- **Rounded SVG Icons**: Smooth rounded geometry (`M8 6.82v10.36...` for Play, `rx="2"` rounded bars for Pause).
+- **Static Glass Sheen**: Removed `transform: scale(...)` zoom animations on hover for a clean, non-distracting glass sheen.
+
+### 7.3 Smart Loading State Machine
+- **Initial Load Phase**: Shows the spinning SVG loader (`.card-spinner-svg`) **only during initial stream buffering** at `00:00` before audio frames begin playing.
+- **Seamless Playback Transition**: Automatically transitions to the Pause SVG icon (`⏸`) as soon as sound begins (`ontimeupdate` with `currentTime > 0` and `!paused`).
+- **Pause & Seek Safety**: Pressing pause instantly resets `cardAudioLoading = false`, preventing spinner flashing. Dragging/seeking the timeline while paused checks `!cardAudioElement.paused` before modifying playing state, keeping the Play icon (`▶`) intact.
+
+### 7.4 Glass Seekbar Track & Radial Glass Handle
+- **Timeline Backfill**: Glass container (`.card-player-timeline`) flush with movement endpoints, with glowing gradient backfill (`.timeline-glass-fill`).
+- **Radial White Glass Handle**: Designed with `background: radial-gradient(circle at 35% 35%, #ffffff 0%, #e6e6e6 60%, #d4d4d4 100%)`, `1.5px` glass border rim, and subtle red ambient glow shadow.
+- **Padded Timestamp Format**: Displayed strictly as `00:00/00:00` with padded leading zeros, omitting `"Stream Preview"` labels.
+
+### 7.5 Circular Sound Control & Vertical Volume Panel
+- **36px Circular Sound Button**: Single `36px × 36px` circular container (`border-radius: 50%`) with speaker SVG icon.
+- **Extended Popover Panel**: Height increased to `125px` track slider, positioned `3px` above the media player frame (`bottom: calc(100% + 11px)`).
+- **Flat Floating Glass Base**: Pointy triangle arrow (`::after`) omitted for a floating card appearance.
+- **Hover & Drag Protection**: 
+  - `6px` invisible hit-box extension (`::before`) keeps the popover smoothly open when hovering slightly outside.
+  - `data-no-drag` and `-webkit-app-region: no-drag` disable desktop window moving over the panel and its hit area.
+  - Smooth vertical mouse drag/click handler (`handleVolumeMouseDown`) updates volume dynamically from 0% to 100%.
+
+---
+
 ## Summary
 With this architecture, Ember bridges the divide between **transient mobile streaming apps** (Metrolist) and **offline archival tools**. Users get instant audio playback, interactive visualizer bars, and EQ music styling—backed by permanent, DRM-free local file ownership.
+
