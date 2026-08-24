@@ -654,4 +654,3 @@ For each track row in your inspect/download table:
 
 ## Summary
 With this architecture, Ember bridges the divide between **transient mobile streaming apps** and **offline archival tools**. Users get instant audio playback, interactive visualizer bars, and EQ music styling—backed by permanent, DRM-free local file ownership.
-
