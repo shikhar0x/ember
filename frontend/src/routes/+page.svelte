@@ -1,14 +1,24 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { invoke, isTauri } from '@tauri-apps/api/core';
   import { openUrl, openPath } from '@tauri-apps/plugin-opener';
   import { fade, fly, scale, crossfade, slide } from 'svelte/transition';
   import { quintOut, cubicOut, backOut } from 'svelte/easing';
-  import MediaPlayer from '$lib/MediaPlayer.svelte';
 
   let activePlayTrack: any = null;
   let activeAudioUrl: string = "";
   let activePlayIndex: number = -1;
+
+  let isSidebarOpen = false;
+  let sidebarActiveTab = "navigation"; // 'navigation' | 'settings'
+
+  function toggleSidebar() {
+    isSidebarOpen = !isSidebarOpen;
+  }
+
+  function closeSidebar() {
+    isSidebarOpen = false;
+  }
 
   let cardAudioElement: HTMLAudioElement | null = null;
   let cardAudioUrl = "";
@@ -386,9 +396,7 @@
   let wallpaperBlur = 3;
   let customSavedColors: string[] = [];
   let customSavedWallpapers: string[] = [];
-  let clockMonth = "";
-  let clockDay = "";
-  let clockTime = "";
+
   let fetchError = "";
   type AppState = "loading" | "greeting" | "main";
   let appState: AppState = "loading";
@@ -674,8 +682,25 @@
 
     const handleGlobalKeydown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        closeSidebar();
         closeProfileMenu();
         activeDropdown = null;
+      }
+
+      // Ctrl + K (Search / Focus URL)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const inputEl = document.querySelector('.top-bar-input input, .input-wrapper input') as HTMLInputElement | null;
+        if (inputEl) {
+          inputEl.focus();
+          inputEl.select();
+        }
+      }
+
+      // Ctrl + T (Toggle Theme)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        toggleManualTheme();
       }
     };
     window.addEventListener('keydown', handleGlobalKeydown);
@@ -717,16 +742,7 @@
       });
     }
 
-    const updateTime = () => {
-      const now = new Date();
-      clockMonth = now.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-      clockDay = now.getDate().toString().padStart(2, '0');
-      const h = now.getHours().toString().padStart(2, '0');
-      const min = now.getMinutes().toString().padStart(2, '0');
-      clockTime = `${h}:${min}`;
-    };
-    updateTime();
-    const clockInterval = setInterval(updateTime, 1000);
+
 
     const ua = navigator.userAgent;
     if (ua.includes("Win")) detectedOS = "Windows";
@@ -815,7 +831,7 @@
       window.removeEventListener('contextmenu', preventContextMenu);
       window.removeEventListener('keydown', handleGlobalKeydown);
       document.removeEventListener('mousedown', handleGlobalMousedown, true);
-      clearInterval(clockInterval);
+
       if (unlistenDragDrop) {
         unlistenDragDrop();
       }
@@ -1763,6 +1779,165 @@
     !!pairedPreviewTrack ||
     (track?.source === 'spotify' && isPlainYouTubeUrl(pairedUrl))
   );
+  // Fixed Bottom Media Player Setup
+  let mediaPlayerAudioElement: HTMLAudioElement | null = null;
+  let mediaPlayerCanvasElement: HTMLCanvasElement | null = null;
+
+  let mediaPlayerAudioCtx: AudioContext | null = null;
+  let mediaPlayerAnalyser: AnalyserNode | null = null;
+  let mediaPlayerEqFilters: BiquadFilterNode[] = [];
+  let mediaPlayerAnimFrameId: number;
+
+  let mediaPlayerPlaying = false;
+  let mediaPlayerTime = 0;
+  let mediaPlayerDuration = 0;
+  let mediaPlayerActiveStyle = "flat";
+
+  const MEDIA_PLAYER_EQ_BANDS = [60, 170, 310, 1000, 3000, 12000];
+
+  const MEDIA_PLAYER_STYLE_PRESETS: Record<string, number[]> = {
+    flat:       [ 0,  0,  0,  0,  0,  0],
+    bass_boost: [ 7,  5,  2,  0, -1, -2],
+    vocal:      [-2, -1,  2,  5,  4,  1],
+    electronic: [ 5,  3,  0,  2,  4,  6],
+  };
+
+  function setupMediaPlayerWebAudio() {
+    if (mediaPlayerAudioCtx) {
+      if (mediaPlayerAudioCtx.state === "suspended") {
+        mediaPlayerAudioCtx.resume().then(() => {
+          console.log("[Ember MediaPlayer] AudioContext resumed -> audio routed to speakers!");
+        });
+      }
+      return;
+    }
+
+    try {
+      if (!mediaPlayerAudioElement) return;
+      mediaPlayerAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = mediaPlayerAudioCtx.createMediaElementSource(mediaPlayerAudioElement);
+
+      mediaPlayerAnalyser = mediaPlayerAudioCtx.createAnalyser();
+      mediaPlayerAnalyser.fftSize = 64;
+      mediaPlayerAnalyser.smoothingTimeConstant = 0.82;
+
+      let previousNode: AudioNode = source;
+      mediaPlayerEqFilters = [];
+      MEDIA_PLAYER_EQ_BANDS.forEach((freq) => {
+        if (!mediaPlayerAudioCtx) return;
+        const filter = mediaPlayerAudioCtx.createBiquadFilter();
+        filter.type = "peaking";
+        filter.frequency.value = freq;
+        filter.Q.value = 1.4;
+        filter.gain.value = 0;
+        previousNode.connect(filter);
+        mediaPlayerEqFilters.push(filter);
+        previousNode = filter;
+      });
+
+      previousNode.connect(mediaPlayerAnalyser);
+      mediaPlayerAnalyser.connect(mediaPlayerAudioCtx.destination);
+
+      if (mediaPlayerAudioCtx.state === "suspended") {
+        mediaPlayerAudioCtx.resume().then(() => {
+          console.log("[Ember MediaPlayer] AudioContext resumed -> audio routed to speakers!");
+        });
+      }
+
+      drawMediaPlayerVisualizer();
+      console.log("[Ember MediaPlayer] Web Audio API initialized, state:", mediaPlayerAudioCtx.state);
+    } catch (e) {
+      console.error("[Ember MediaPlayer] Web Audio API error:", e);
+    }
+  }
+
+  function handleMediaPlayerStyleChange(styleName: string) {
+    mediaPlayerActiveStyle = styleName;
+    const targetGains = MEDIA_PLAYER_STYLE_PRESETS[styleName] || MEDIA_PLAYER_STYLE_PRESETS.flat;
+    if (!mediaPlayerAudioCtx) return;
+
+    mediaPlayerEqFilters.forEach((filter, index) => {
+      filter.gain.setTargetAtTime(targetGains[index], mediaPlayerAudioCtx!.currentTime, 0.15);
+    });
+  }
+
+  function drawMediaPlayerVisualizer() {
+    if (!mediaPlayerAnalyser || !mediaPlayerCanvasElement) return;
+    const ctx = mediaPlayerCanvasElement.getContext("2d");
+    if (!ctx) return;
+
+    const bufferLength = mediaPlayerAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    mediaPlayerAnalyser.getByteFrequencyData(dataArray);
+
+    ctx.clearRect(0, 0, mediaPlayerCanvasElement.width, mediaPlayerCanvasElement.height);
+
+    const barWidth = (mediaPlayerCanvasElement.width / bufferLength) * 0.78;
+    let x = 0;
+
+    for (let i = 0; i < bufferLength; i++) {
+      const value = dataArray[i];
+      const barHeight = Math.max(3, (value / 255) * mediaPlayerCanvasElement.height);
+
+      const red = 255;
+      const green = Math.max(70, 160 - i * 4);
+      const blue = 40;
+      ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+
+      ctx.fillRect(
+        x,
+        mediaPlayerCanvasElement.height - barHeight,
+        barWidth,
+        barHeight
+      );
+
+      x += barWidth + 3;
+    }
+
+    mediaPlayerAnimFrameId = requestAnimationFrame(drawMediaPlayerVisualizer);
+  }
+
+  function toggleMediaPlayerPlay() {
+    if (!mediaPlayerAudioElement) return;
+    setupMediaPlayerWebAudio();
+    if (mediaPlayerAudioElement.paused) {
+      mediaPlayerAudioElement.play();
+      mediaPlayerPlaying = true;
+    } else {
+      mediaPlayerAudioElement.pause();
+      mediaPlayerPlaying = false;
+    }
+  }
+
+  function handleMediaPlayerSeek(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (mediaPlayerAudioElement) {
+      mediaPlayerAudioElement.currentTime = parseFloat(input.value);
+    }
+  }
+
+  function formatMediaPlayerTime(sec: number): string {
+    if (isNaN(sec) || sec === 0) return "0:00";
+    const mins = Math.floor(sec / 60);
+    const secs = Math.floor(sec % 60);
+    return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
+  }
+
+  $: if (activeAudioUrl && mediaPlayerAudioElement) {
+    console.log("[Ember MediaPlayer] new activeAudioUrl requested:", activeAudioUrl);
+    mediaPlayerAudioElement.play().then(() => {
+      console.log("[Ember MediaPlayer] mediaPlayerAudioElement.play() succeeded!");
+      setupMediaPlayerWebAudio();
+      mediaPlayerPlaying = true;
+    }).catch((e) => {
+      console.error("[Ember MediaPlayer] mediaPlayerAudioElement.play() FAILED:", e);
+    });
+  }
+
+  onDestroy(() => {
+    if (mediaPlayerAnimFrameId) cancelAnimationFrame(mediaPlayerAnimFrameId);
+    if (mediaPlayerAudioCtx) mediaPlayerAudioCtx.close();
+  });
 </script>
 
 <svelte:window oncontextmenu={(e) => e.preventDefault()} />
@@ -1838,14 +2013,141 @@
 {/if}
 
 {#if appState === "main"}
-  <div class="clock-widget" class:light-theme={isLightTheme} in:fly={{ y: 30, duration: 800, delay: 200, easing: quintOut }}>
-    <div class="clock-date">
-      <span class="clock-month">{clockMonth}</span>
-      <span class="clock-day">{clockDay}</span>
-    </div>
-    <div class="clock-divider"></div>
-    <div class="clock-time">{clockTime}</div>
-  </div>
+  <!-- Three-lined Sandwich SVG Button (Hamburger Menu) -->
+  <button
+    type="button"
+    class="sidebar-toggle-btn"
+    class:light-theme={isLightTheme}
+    onclick={toggleSidebar}
+    aria-label="Open navigation sidebar"
+  >
+    <svg class="hamburger-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="4" y1="6" x2="20" y2="6"></line>
+      <line x1="4" y1="12" x2="20" y2="12"></line>
+      <line x1="4" y1="18" x2="20" y2="18"></line>
+    </svg>
+  </button>
+
+  {#if isSidebarOpen}
+    <!-- Sidebar Backdrop Overlay -->
+    <div
+      class="sidebar-backdrop"
+      onclick={closeSidebar}
+      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeSidebar(); } }}
+      role="button"
+      tabindex="0"
+      aria-label="Close sidebar"
+      transition:fade={{ duration: 300 }}
+    ></div>
+
+    <!-- Sidebar Panel Drawer -->
+    <aside
+      class="sidebar-drawer"
+      class:light-theme={isLightTheme}
+      transition:fly={{ x: -340, duration: 320, easing: quintOut }}
+    >
+      <!-- Header -->
+      <div class="sidebar-header">
+        {#if sidebarActiveTab === 'settings'}
+          <div class="sidebar-brand">
+            <button type="button" class="sidebar-back-btn" onclick={() => sidebarActiveTab = 'navigation'} aria-label="Go back">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+              </svg>
+            </button>
+            <span class="sidebar-brand-name" style="margin-left: 0.5rem;">SETTINGS</span>
+          </div>
+        {:else}
+          <div class="sidebar-brand">
+            <div class="sidebar-logo-glow">🔥</div>
+            <div class="sidebar-brand-info">
+              <span class="sidebar-brand-name">EMBER</span>
+              <span class="sidebar-brand-tag font-mono">v1.1.0</span>
+            </div>
+          </div>
+        {/if}
+        <button type="button" class="sidebar-close-btn" onclick={closeSidebar} aria-label="Close sidebar">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Navigation Links & App Features -->
+      <nav class="sidebar-nav">
+        {#if sidebarActiveTab === 'navigation'}
+          <div class="sidebar-section-title">STUDIO & NAVIGATION</div>
+
+          <button
+            type="button"
+            class="sidebar-nav-item"
+            class:active={!showDetails}
+            onclick={() => { clearTrack(); closeSidebar(); }}
+          >
+            <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path>
+              <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+            <span class="sidebar-nav-label">Home</span>
+          </button>
+
+          <button
+            type="button"
+            class="sidebar-nav-item"
+            onclick={() => sidebarActiveTab = 'settings'}
+          >
+            <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span class="sidebar-nav-label">Settings</span>
+          </button>
+        {:else if sidebarActiveTab === 'settings'}
+          <div class="sidebar-section-title">DOWNLOAD & STORAGE</div>
+
+          <div class="sidebar-info-card">
+            <div class="sidebar-card-label">Output Directory</div>
+            <div class="sidebar-card-val font-mono truncate" title="~/Downloads/Ember">
+              ~/Downloads/Ember
+            </div>
+          </div>
+
+          <div class="sidebar-info-card" style="margin-top: 0.5rem;">
+            <div class="sidebar-card-label">Audio Quality</div>
+            <div class="sidebar-card-val font-mono">320 kbps (MP3/FLAC)</div>
+          </div>
+
+          <div class="sidebar-section-title" style="margin-top: 1.5rem;">KEYBOARD SHORTCUTS</div>
+          <div class="sidebar-shortcuts-grid">
+            <div class="sidebar-shortcut-item">
+              <span class="shortcut-desc">Search / Focus URL</span>
+              <kbd class="shortcut-badge">Ctrl + K</kbd>
+            </div>
+            <div class="sidebar-shortcut-item">
+              <span class="shortcut-desc">Toggle Light/Dark</span>
+              <kbd class="shortcut-badge">Ctrl + T</kbd>
+            </div>
+            <div class="sidebar-shortcut-item">
+              <span class="shortcut-desc">Close / Escape</span>
+              <kbd class="shortcut-badge">Esc</kbd>
+            </div>
+          </div>
+        {/if}
+      </nav>
+
+      <div class="sidebar-spacer" style="flex: 1;"></div>
+
+      <!-- Footer -->
+      <div class="sidebar-footer">
+        <span class="sidebar-pulse-dot"></span>
+        <span>Ember Studio Connected</span>
+      </div>
+    </aside>
+  {/if}
 
   {#if userProfile}
     <div class="profile-widget" class:light-theme={isLightTheme} in:fly={{ y: 30, duration: 800, delay: 200, easing: quintOut }}>
@@ -3116,14 +3418,104 @@
 </div>
 
 {#if activePlayTrack}
-  <MediaPlayer
-    currentTrackTitle={activePlayTrack.title || "Unknown"}
-    currentArtist={activePlayTrack.artists?.join(', ') || "Unknown"}
-    currentCoverUrl={activePlayTrack.cover_url || playlistCover || "/favicon.png"}
-    audioUrl={activeAudioUrl}
-    isLocal={Boolean(activePlayTrack.local_file_path || activePlayTrack.path)}
-    onSaveToLibrary={handleSaveToLibrary}
-  />
+  <div class="ember-bottom-player">
+    <audio
+      bind:this={mediaPlayerAudioElement}
+      src={activeAudioUrl}
+      autoplay
+      crossorigin="anonymous"
+      onplay={() => { console.log("[Ember MediaPlayer] onplay event"); setupMediaPlayerWebAudio(); mediaPlayerPlaying = true; }}
+      onpause={() => { console.log("[Ember MediaPlayer] onpause event"); mediaPlayerPlaying = false; }}
+      onwaiting={() => console.log("[Ember MediaPlayer] onwaiting -> buffering audio stream...")}
+      onerror={() => console.error("[Ember MediaPlayer] onerror -> HTMLAudioElement error:", mediaPlayerAudioElement?.error)}
+      ontimeupdate={() => { if (mediaPlayerAudioElement) mediaPlayerTime = mediaPlayerAudioElement.currentTime; }}
+      onloadedmetadata={() => { if (mediaPlayerAudioElement) { console.log("[Ember MediaPlayer] onloadedmetadata -> duration:", mediaPlayerAudioElement.duration); mediaPlayerDuration = mediaPlayerAudioElement.duration; } }}
+      onended={() => { mediaPlayerPlaying = false; }}
+    ></audio>
+
+    <div class="eb-track-info">
+      <img
+        src={activePlayTrack.cover_url || playlistCover || "/favicon.png"}
+        alt="Cover"
+        class="eb-cover-img"
+      />
+      <div class="eb-metadata">
+        <h4 class="eb-title">{activePlayTrack.title || "Unknown"}</h4>
+        <p class="eb-artist">{activePlayTrack.artists?.join(', ') || "Unknown"}</p>
+        {#if Boolean(activePlayTrack.local_file_path || activePlayTrack.path)}
+          <span class="eb-badge local">
+            Local Library
+          </span>
+        {:else}
+          <span class="eb-badge stream">
+            YouTube Stream
+          </span>
+        {/if}
+      </div>
+    </div>
+
+    <div class="eb-player-controls">
+      <div class="eb-controls-top">
+        <button
+          onclick={toggleMediaPlayerPlay}
+          class="eb-play-btn"
+          title={mediaPlayerPlaying ? "Pause stream" : "Play stream"}
+        >
+          <span>{mediaPlayerPlaying ? "⏸" : "▶"}</span>
+        </button>
+
+        <div class="eb-visualizer-container">
+          <canvas bind:this={mediaPlayerCanvasElement} width="180" height="28" class="eb-visualizer-canvas"></canvas>
+        </div>
+      </div>
+
+      <div class="eb-timeline-container">
+        <span>{formatMediaPlayerTime(mediaPlayerTime)}</span>
+        <input
+          type="range"
+          min="0"
+          max={mediaPlayerDuration || 0}
+          value={mediaPlayerTime}
+          oninput={handleMediaPlayerSeek}
+          class="eb-seek-slider"
+          aria-label="Seek stream position"
+        />
+        <span>{formatMediaPlayerTime(mediaPlayerDuration)}</span>
+      </div>
+    </div>
+
+    <div class="eb-player-actions">
+      <div class="eb-style-selector">
+        <span class="eb-style-label">Style:</span>
+        <select
+          bind:value={mediaPlayerActiveStyle}
+          onchange={(e) => handleMediaPlayerStyleChange(e.currentTarget.value)}
+          class="eb-select"
+        >
+          <option value="flat">Flat</option>
+          <option value="bass_boost">Bass Boost</option>
+          <option value="vocal">Vocal / Acoustic</option>
+          <option value="electronic">Electronic</option>
+        </select>
+      </div>
+
+      {#if !Boolean(activePlayTrack.local_file_path || activePlayTrack.path) && handleSaveToLibrary}
+        <button
+          onclick={handleSaveToLibrary}
+          class="eb-save-btn"
+          title="Save this stream to your permanent library with ID3 metadata"
+        >
+          <span>↓</span>
+          <span>Save to Library</span>
+        </button>
+      {:else}
+        <div class="eb-in-library">
+          <span>✓</span>
+          <span>In Library</span>
+        </div>
+      {/if}
+    </div>
+  </div>
 {/if}
 
 <style>
@@ -3142,6 +3534,221 @@
     opacity: 1;
     background: rgba(225, 29, 46, 0.15);
     transform: scale(1.15);
+  }
+
+  .ember-bottom-player {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 84px;
+    z-index: 9999999 !important;
+    background: rgba(18, 20, 26, 0.98);
+    border-top: 1px solid rgba(255, 94, 98, 0.4);
+    box-shadow: 0 -12px 35px rgba(0, 0, 0, 0.9);
+    padding: 0 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    user-select: none;
+    -webkit-user-select: none;
+    box-sizing: border-box;
+    font-family: 'Inter', sans-serif;
+  }
+  .eb-track-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 25%;
+    min-width: 200px;
+  }
+  .eb-cover-img {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: #262626;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+  .eb-metadata {
+    overflow: hidden;
+  }
+  .eb-title {
+    margin: 0;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .eb-artist {
+    margin: 0;
+    font-size: 0.75rem;
+    color: #a3a3a3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .eb-badge {
+    display: inline-block;
+    margin-top: 0.125rem;
+    padding: 0.125rem 0.375rem;
+    font-size: 10px;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    border-radius: 4px;
+  }
+  .eb-badge.local {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+  }
+  .eb-badge.stream {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+  }
+  .eb-player-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    max-width: 576px;
+    padding: 0 1rem;
+  }
+  .eb-controls-top {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 0.25rem;
+  }
+  .eb-play-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #f59e0b, #ea580c);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(234, 88, 12, 0.3);
+    transition: all 0.2s ease;
+    padding: 0;
+  }
+  .eb-play-btn:hover {
+    filter: brightness(1.1);
+  }
+  .eb-play-btn:active {
+    transform: scale(0.95);
+  }
+  .eb-play-btn span {
+    font-size: 1.125rem;
+    margin-left: 2px;
+  }
+  .eb-visualizer-container {
+    width: 192px;
+    height: 36px;
+    background: rgba(10, 10, 10, 0.6);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 0 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+  .eb-visualizer-canvas {
+    width: 100%;
+    height: 100%;
+  }
+  .eb-timeline-container {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    font-size: 0.75rem;
+    color: #a3a3a3;
+    font-family: monospace;
+  }
+  .eb-seek-slider {
+    flex: 1;
+    height: 6px;
+    background: #404040;
+    border-radius: 3px;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+  }
+  .eb-seek-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ea580c;
+    cursor: pointer;
+  }
+  .eb-player-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 1rem;
+    width: 25%;
+    min-width: 220px;
+  }
+  .eb-style-selector {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(10, 10, 10, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0.375rem 0.625rem;
+    border-radius: 8px;
+  }
+  .eb-style-label {
+    font-size: 0.75rem;
+    color: #a3a3a3;
+    font-weight: 500;
+  }
+  .eb-select {
+    background: transparent;
+    font-size: 0.75rem;
+    color: #ffffff;
+    font-weight: 500;
+    border: none;
+    outline: none;
+    cursor: pointer;
+  }
+  .eb-select option {
+    background: #171717;
+  }
+  .eb-save-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .eb-save-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .eb-in-library {
+    font-size: 0.75rem;
+    color: #34d399;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
   }
 
   :global(*) {
@@ -3516,7 +4123,7 @@
   .btn-text { position: relative; z-index: 1; }
   .btn-glow { display: none; }
   button:hover:not(:disabled) .btn-glow { display: none; }
-  button:hover:not(:disabled):not(.format-tab):not(.delete-history-item-btn):not(.clear-url-btn) { transform: scale(1.02);
+  button:hover:not(:disabled):not(.format-tab):not(.delete-history-item-btn):not(.clear-url-btn):not(.sidebar-toggle-btn):not(.sidebar-nav-item):not(.sidebar-close-btn):not(.sidebar-back-btn) { transform: scale(1.02);
     background: linear-gradient(to bottom, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
     border-color: rgba(255,255,255,0.08);
     border-top-color: rgba(255,255,255,0.22);
@@ -3527,7 +4134,7 @@
       0 6px 20px rgba(0,0,0,0.22),
       0 2px 8px rgba(0,0,0,0.15);
   }
-  button:active:not(:disabled):not(.format-tab):not(.delete-history-item-btn):not(.clear-url-btn) { transform: scale(0.98); }
+  button:active:not(:disabled):not(.format-tab):not(.delete-history-item-btn):not(.clear-url-btn):not(.sidebar-toggle-btn):not(.sidebar-nav-item):not(.sidebar-close-btn):not(.sidebar-back-btn) { transform: scale(0.98); }
   button:disabled { 
     background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.4); 
     border-color: rgba(255,255,255,0.08);
@@ -4405,59 +5012,350 @@
     max-width: 340px;
   }
 
-  .clock-widget {
+  /* Sidebar Toggle Button (Hamburger Menu) */
+  .sidebar-toggle-btn {
     position: fixed;
     top: calc(2.8rem + var(--titlebar-offset, 0px));
     transform: translateY(-50%);
-    left: 2rem;
+    left: 2.4rem;
     z-index: 1000;
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    background: rgba(255,255,255,0.02);
-    padding: 0.4rem 1.2rem;
-    border-radius: 100px;
-    border: 1px solid rgba(255,255,255,0.08);
+    width: 62px;
+    height: 62px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
+    color: rgba(255, 255, 255, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.15),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+      0 8px 32px rgba(0, 0, 0, 0.25),
+      0 2px 6px rgba(0, 0, 0, 0.12);
+  }
+  .sidebar-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.20),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+      0 4px 15px rgba(0, 0, 0, 0.25);
+  }
+  .sidebar-toggle-btn:active {
+    background: rgba(255, 255, 255, 0.07);
+  }
+  .sidebar-toggle-btn.light-theme {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.06);
+    color: #1a1a1a;
+    box-shadow:
+      0 8px 40px rgba(0, 0, 0, 0.18),
+      0 2px 12px rgba(0, 0, 0, 0.08);
+  }
+  .sidebar-toggle-btn.light-theme:hover {
+    background: rgba(0, 0, 0, 0.06);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: #000000;
+  }
+
+  /* Sidebar Backdrop Overlay */
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 10000;
+    cursor: pointer;
+  }
+
+  /* Sidebar Panel Drawer */
+  .sidebar-drawer {
+    position: fixed;
+    top: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: 310px;
+    background: rgba(16, 18, 24, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 20px;
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    z-index: 10001;
+    display: flex;
+    flex-direction: column;
+    padding: 1.5rem;
+    box-shadow: 16px 0 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.3);
     color: rgba(255, 255, 255, 0.9);
     font-family: 'Inter', sans-serif;
     user-select: none;
-    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
-    box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.15),
-      inset 0 -1px 0 rgba(0,0,0,0.15),
-      0 8px 32px rgba(0,0,0,0.25),
-      0 2px 6px rgba(0,0,0,0.12);
     box-sizing: border-box;
-    height: 62px;
+    overflow: hidden;
   }
-  .clock-date {
+  .sidebar-drawer.light-theme {
+    background: rgba(255, 255, 255, 0.96);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: #1a1a1a;
+    box-shadow: 16px 0 50px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  }
+
+  .sidebar-header {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 1rem;
+  }
+  .sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .sidebar-logo-glow {
+    font-size: 1.4rem;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(225, 29, 46, 0.2) 0%, rgba(255, 94, 98, 0.2) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    display: flex;
     align-items: center;
     justify-content: center;
-    line-height: 1.05;
   }
-  .clock-month {
-    font-size: 0.8rem;
+  .sidebar-brand-info {
+    display: flex;
+    flex-direction: column;
+  }
+  .sidebar-brand-name {
+    font-weight: 800;
+    font-size: 1.1rem;
+    letter-spacing: 0.08em;
+    color: #ffffff;
+  }
+  .sidebar-drawer.light-theme .sidebar-brand-name {
+    color: #111111;
+  }
+  .sidebar-brand-tag {
+    font-size: 0.68rem;
+    color: rgba(255, 94, 98, 0.9);
     font-weight: 700;
-    letter-spacing: 0.5px;
-    color: #e11d2e;
   }
-  .clock-day {
-    font-size: 1.45rem;
+
+  .sidebar-close-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    color: rgba(255, 255, 255, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+  }
+  .sidebar-close-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+  }
+  .sidebar-drawer.light-theme .sidebar-close-btn {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: rgba(0, 0, 0, 0.6);
+  }
+  .sidebar-drawer.light-theme .sidebar-close-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: #000000;
+  }
+
+  .sidebar-back-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    border-radius: 9px;
+    width: 32px;
+    height: 32px;
+    color: rgba(255, 255, 255, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+  }
+  .sidebar-back-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+  }
+  .sidebar-drawer.light-theme .sidebar-back-btn {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.15);
+    color: #1a1a1a;
+  }
+  .sidebar-drawer.light-theme .sidebar-back-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.25);
+    color: #000000;
+  }
+
+  .sidebar-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 1rem 0;
+  }
+  .sidebar-drawer.light-theme .sidebar-divider {
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .sidebar-section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: rgba(255, 94, 98, 0.9);
+    letter-spacing: 0.08em;
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+  }
+  .sidebar-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s ease;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .sidebar-nav-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.06);
+  }
+  .sidebar-nav-item.active {
+    background: rgba(225, 29, 46, 0.1);
+    color: #ff5e62;
+    border-color: rgba(225, 29, 46, 0.15);
     font-weight: 600;
   }
-  .clock-divider {
-    width: 1px;
-    height: 32px;
-    background: rgba(255, 255, 255, 0.1);
+  .sidebar-drawer.light-theme .sidebar-nav-item {
+    color: rgba(0, 0, 0, 0.75);
   }
-  .clock-time {
-    font-size: 1.2rem;
-    font-weight: 300;
-    letter-spacing: 0.5px;
+  .sidebar-drawer.light-theme .sidebar-nav-item:hover {
+    background: rgba(0, 0, 0, 0.04);
+    color: #000000;
+    border-color: rgba(0, 0, 0, 0.06);
+  }
+  .sidebar-drawer.light-theme .sidebar-nav-item.active {
+    background: rgba(225, 29, 46, 0.06);
+    color: #e11d2e;
+    border-color: rgba(225, 29, 46, 0.1);
+  }
+  .sidebar-nav-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+  .sidebar-nav-label {
+    font-size: 0.85rem;
+  }
+
+  .sidebar-info-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .sidebar-drawer.light-theme .sidebar-info-card {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.06);
+  }
+  .sidebar-card-label {
+    font-size: 0.65rem;
+    color: rgba(255, 255, 255, 0.45);
+    font-weight: 600;
+  }
+  .sidebar-drawer.light-theme .sidebar-card-label {
+    color: rgba(0, 0, 0, 0.5);
+  }
+  .sidebar-card-val {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
+  }
+  .sidebar-drawer.light-theme .sidebar-card-val {
+    color: #111111;
+  }
+
+  .sidebar-shortcuts-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .sidebar-shortcut-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.75rem;
+  }
+  .shortcut-desc {
+    color: rgba(255, 255, 255, 0.6);
+  }
+  .sidebar-drawer.light-theme .shortcut-desc {
+    color: rgba(0, 0, 0, 0.6);
+  }
+  .shortcut-badge {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.65rem;
+    color: rgba(255, 255, 255, 0.85);
+    font-family: monospace;
+  }
+  .sidebar-drawer.light-theme .shortcut-badge {
+    background: rgba(0, 0, 0, 0.06);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: #333333;
+  }
+
+  .sidebar-footer {
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.5);
+  }
+  .sidebar-drawer.light-theme .sidebar-footer {
+    border-top-color: rgba(0, 0, 0, 0.08);
+    color: rgba(0, 0, 0, 0.5);
+  }
+  .sidebar-pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
   }
 
   .window-controls-standalone {
@@ -5410,7 +6308,7 @@
 
   /* LIGHT THEME STYLES OVERRIDE CASCADE */
   .container.light-theme,
-  .clock-widget.light-theme,
+  .sidebar-toggle-btn.light-theme,
   .profile-widget.light-theme {
     color: rgba(15, 17, 23, 0.9) !important;
   }
@@ -5422,7 +6320,7 @@
   .container.light-theme div,
   .container.light-theme button,
   .container.light-theme input,
-  .clock-widget.light-theme *,
+  .sidebar-toggle-btn.light-theme *,
   .profile-widget.light-theme * {
     /* Exclude accent items, color wheel sectors, and checkbox marks from global color override */
     color: inherit;
@@ -5446,7 +6344,6 @@
   .container.light-theme .track-row-title,
   .container.light-theme .artist-name,
   .container.light-theme .album-name,
-  .clock-widget.light-theme .clock-time,
   .container.light-theme .info-val,
   .container.light-theme .meta-val,
   .container.light-theme .color-hex-label {
@@ -5460,9 +6357,6 @@
   }
   
   /* Secondary / Muted Text Elements */
-  .clock-widget.light-theme .clock-month,
-  .clock-widget.light-theme .clock-day,
-  .clock-widget.light-theme .clock-date,
   .container.light-theme .subtitle,
   .container.light-theme .opt-desc,
   .container.light-theme .history-url,
@@ -5491,7 +6385,7 @@
   
   /* SVG icon stroke/fill styling */
   .container.light-theme svg,
-  .clock-widget.light-theme svg,
+  .sidebar-toggle-btn.light-theme svg,
   .profile-widget.light-theme svg {
     color: rgba(15, 17, 23, 0.7) !important;
   }
@@ -5510,7 +6404,7 @@
   
   /* Glass Card overrides (Remove dark frame background & shadows) */
   .container.light-theme .glass-card,
-  .clock-widget.light-theme,
+  .sidebar-toggle-btn.light-theme,
   .profile-widget.light-theme,
   .container.light-theme .details-layout {
     background: rgba(255, 255, 255, 0.55) !important;
@@ -5518,18 +6412,16 @@
     border-top-color: rgba(255, 255, 255, 0.6) !important;
     border-bottom-color: rgba(0, 0, 0, 0.02) !important;
     box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.4),
-      0 8px 32px rgba(0, 0, 0, 0.04),
-      0 2px 6px rgba(0, 0, 0, 0.02) !important;
+      0 8px 40px rgba(0,0,0,0.18),
+      0 2px 12px rgba(0,0,0,0.08) !important;
   }
   .container.light-theme .glass-card:hover,
-  .clock-widget.light-theme:hover,
+  .sidebar-toggle-btn.light-theme:hover,
   .profile-widget.light-theme:hover {
     background: rgba(255, 255, 255, 0.6) !important;
     box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.5),
-      0 12px 36px rgba(0, 0, 0, 0.06),
-      0 3px 8px rgba(0, 0, 0, 0.03) !important;
+      0 12px 48px rgba(0,0,0,0.2),
+      0 3px 16px rgba(0,0,0,0.1) !important;
   }
 
   /* --- RESULT PAGE & PLAYLIST OVERRIDES --- */
@@ -5654,8 +6546,7 @@
   /* Divider adjustments */
   .container.light-theme .divider,
   .container.light-theme .about-divider-thin,
-  .profile-widget.light-theme .profile-divider,
-  .clock-widget.light-theme .clock-divider {
+  .profile-widget.light-theme .profile-divider {
     background: rgba(0, 0, 0, 0.08) !important;
   }
   
@@ -6369,28 +7260,15 @@
   }
 
   @media (max-width: 900px) {
-    /* Compact Clock Widget */
-    .clock-widget {
+    /* Compact Sidebar Toggle Button */
+    .sidebar-toggle-btn {
       left: 2rem;
-      padding: 0.3rem 1.0rem;
-      gap: 0.6rem;
+      width: 48px;
+      height: 48px;
       box-shadow:
         inset 0 1px 0 rgba(255,255,255,0.15),
         inset 0 -1px 0 rgba(0,0,0,0.15);
       box-sizing: border-box;
-      height: 48px;
-    }
-    .clock-month {
-      font-size: 0.7rem;
-    }
-    .clock-day {
-      font-size: 1.15rem;
-    }
-    .clock-divider {
-      height: 22px;
-    }
-    .clock-time {
-      font-size: 0.95rem;
     }
 
     /* Compact Profile Widget */
